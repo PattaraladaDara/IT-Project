@@ -184,9 +184,9 @@ function Kiosk({ onCreate }) {
     finally { setBusy(false); }
   }
   return <Shell simple><div className="kiosk-screen">
-    <header className="kiosk-topbar"><span>Medical facility Kasetsart University Kamphaeng Saen Campus Medical Clinic</span><strong>From Admin</strong></header>
-    <main className="kiosk-content"><h1>Press the queue</h1><section className="kiosk-panel">
-      <div className="kiosk-panel-head"><strong>Select a category</strong><span>เลือกหมวดหมู่การรักษา</span></div>
+    <header className="kiosk-topbar"><span>คลินิกมหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตกำแพงแสน</span></header>
+    <main className="kiosk-content"><h1>กดรับบัตรคิว</h1><section className="kiosk-panel">
+      <div className="kiosk-panel-head"><strong>เลือกบริการที่ต้องการ</strong></div>
       <div className="kiosk-options">{Object.entries(CATEGORY).map(([key, item]) => <button key={key} className={`kiosk-option ${category === key ? 'selected' : ''}`} onClick={() => setCategory(key)}><span className="kiosk-icon">{item.icon}</span><strong>{item.label}</strong></button>)}</div>
       <button className="kiosk-confirm" disabled={!category || busy} onClick={submit}>{busy ? 'กำลังออกคิว...' : 'ยืนยัน'}</button>
       {success && <div className="kiosk-success" role="status">
@@ -256,7 +256,7 @@ function Login() {
 function YourQueue({ ticket }) {
   const bg = ticket.category === 'emergency' ? emergencyQueueBg : generalQueueBg;
   return <Shell simple><div className="your-queue-screen" style={{ '--queue-bg': `url(${bg})` }}>
-    <header className="kiosk-topbar"><span>Medical facility Kasetsart University Kamphaeng Saen Campus Medical Clinic</span><strong>From Admin</strong></header>
+    <header className="kiosk-topbar"><span>Medical facility Kasetsart University Kamphaeng Saen Campus Medical Clinic</span></header>
     <main className="your-queue-content"><h1>Your Queue</h1><section className="your-queue-card"><div className="your-queue-meta"><span>วันที่ / เดือน / ปี</span><b>{CATEGORY[ticket.category]?.label}</b></div><strong className="your-queue-label">หมายเลขคิวของคุณ</strong><div className="your-queue-number">{ticket.ticketCode}</div><p>จำนวนคิวก่อนหน้า -</p><p>โปรดตั้งเสียงสัญญาณ และจดหมายเลขคิวของคุณจากจอ</p></section><button className="back-home" onClick={() => navigate('/')}>กลับหน้าจอหลัก</button></main>
   </div></Shell>;
 }

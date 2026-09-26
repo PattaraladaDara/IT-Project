@@ -1,15 +1,21 @@
 $ErrorActionPreference = 'Stop'
 
-$psqlPath = 'C:\Program Files\PostgreSQL\17\bin\psql.exe'
+$psqlCommand = Get-Command 'psql.exe' -ErrorAction SilentlyContinue
+$psqlPath = if ($psqlCommand) {
+  $psqlCommand.Source
+} else {
+  Get-ChildItem -Path 'C:\Program Files\PostgreSQL' -Filter 'psql.exe' -Recurse -ErrorAction SilentlyContinue |
+    Select-Object -First 1 -ExpandProperty FullName
+}
 $databaseName = 'queueflow_dev'
 $schemaPath = Join-Path $PSScriptRoot 'queueflow_schema.sql'
 
 if (-not (Test-Path -LiteralPath $psqlPath)) {
-  throw "ไม่พบ psql ที่ $psqlPath"
+  throw 'psql.exe was not found. Install PostgreSQL, or add its bin folder to PATH.'
 }
 
 if (-not (Test-Path -LiteralPath $schemaPath)) {
-  throw "ไม่พบไฟล์ schema ที่ $schemaPath"
+  throw "Schema file was not found at $schemaPath"
 }
 
 $securePassword = Read-Host 'Enter PostgreSQL password for user postgres' -AsSecureString
@@ -33,7 +39,7 @@ try {
   if ($existsExitCode -ne 0) {
     throw 'Could not check whether the development database already exists'
   }
-  $exists = (@($existsOutput) -join "`n").Trim()
+  $exists = (@($existsOutput) -join [Environment]::NewLine).Trim()
 
   if ($exists -ne '1') {
     & $psqlPath -w -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE $databaseName;"

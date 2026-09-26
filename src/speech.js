@@ -38,7 +38,7 @@ export function speakQueue(ticket, counter = DEFAULT_COUNTER) {
     ที่ช่องหมายเลข 
     ${counter}`);;
   utterance.lang = 'th-TH';
-  utterance.rate = 0.3;
+  utterance.rate = 0.65;
   utterance.pitch = 1;
   const voice = getThaiVoice();
   if (voice) utterance.voice = voice;

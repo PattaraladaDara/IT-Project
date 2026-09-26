@@ -50,6 +50,11 @@
 .entry-content{padding-top:58px}.entry-panel{max-width:980px}.entry-options{grid-template-columns:repeat(3,1fr);gap:22px;padding:45px 34px 30px}.entry-option{height:190px;flex-direction:column;gap:7px;text-align:center}.entry-option .kiosk-icon{font-size:48px}.entry-option strong{font-size:28px}.entry-option small{max-width:220px;color:#52617b;font-size:13px;line-height:1.35}.kiosk-success{margin:0 42px 18px;padding:12px 14px;border-radius:8px;background:#d7f5e2;color:#17663a;text-align:center;font-weight:700}.login-screen .kiosk-content{padding-top:70px}.login-panel{width:min(480px,100%);display:flex;flex-direction:column;gap:16px;background:#fff;border:1px solid #d1d5dc;border-radius:12px;box-shadow:0 4px 5px #0003;padding:30px 32px}.login-panel label{display:flex;flex-direction:column;gap:7px;color:#324363;font-size:14px;font-weight:700}.login-panel input{padding:13px 14px;border:1px solid #c5cad6;border-radius:7px;background:#fff;color:#1d2b46}.login-panel .kiosk-confirm{width:100%;margin:8px 0 0}.login-error{margin:0;color:#b42318;font-size:13px}.login-back{border:0;background:transparent;color:#0754c8;font-size:14px;cursor:pointer}
 @media(max-width:700px){.entry-content{padding-top:30px}.entry-options{grid-template-columns:1fr;padding:25px 15px 20px;gap:12px}.entry-option{height:125px}.entry-option .kiosk-icon{font-size:34px}.entry-option strong{font-size:22px}.entry-option small{font-size:11px}.login-screen .kiosk-content{padding-top:32px}.login-panel{padding:22px 17px}.kiosk-success{margin-inline:15px}}
 
+/* Clear visual feedback for the queue-confirmation button. */
+.kiosk-confirm{transition:background-color .15s ease,box-shadow .15s ease,transform .1s ease}
+.kiosk-confirm:not(:disabled):hover{background:#57adca;box-shadow:0 5px 7px #0004}
+.kiosk-confirm:not(:disabled):active{background:#236e9c;transform:translateY(2px);box-shadow:0 2px 2px #0003}
+
 /* Thermal receipt printing: use the browser's normal print dialog. */
 .kiosk-success{display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap}
 .print-ticket-button{border:1px solid #2861b4;border-radius:7px;background:#fff;color:#2861b4;padding:7px 12px;font-size:13px;font-weight:700;cursor:pointer}
