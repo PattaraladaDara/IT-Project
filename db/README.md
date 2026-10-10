@@ -34,6 +34,8 @@ The schema is designed for the queue flow currently used by the React UI and loc
 - `queue_tickets` stores issued tickets and their current status.
 - `queue_sequences` keeps numbering independent per day and prefix.
 - `queue_events` keeps an audit trail for call, recall, done, skip, and requeue actions.
+- Visible ticket numbers cycle from `Q001` through `Q999` and then return to `Q001`.
+  The database keeps a separate internal sequence number so ticket rows remain unique.
 - `app_users` is reserved for the future staff login API; no demo password is inserted.
 - `sync_runs` is reserved for the future Google Sheets-to-PostgreSQL nightly sync.
 

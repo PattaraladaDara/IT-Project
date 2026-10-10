@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiConfig, apiRequest, demoQueue } from './api.js';
 import generalQueueBg from './assets/queue-general-bg.png';
 import emergencyQueueBg from './assets/queue-emergency-bg.png';
@@ -12,6 +12,9 @@ import adminDashboard from './assets/admin-dashboard.svg';
 import adminReport from './assets/admin-report.svg';
 import queueAlarm from './assets/queue-alarm.svg';
 import { speakQueue } from './speech.js';
+import { useDashboardMetrics } from './hooks/useDashboardMetrics.js';
+import { useQueueData } from './hooks/useQueueData.js';
+import { buildDashboardFallback, buildDashboardViewModel, formatDashboardUpdatedAt } from './dashboardMetrics.js';
 
 const CATEGORY = {
   general: { label: 'ผู้ป่วยทั่วไป', description: 'รับบริการตามลำดับคิวปกติ', color: 'blue', icon: '▣' },
@@ -38,29 +41,6 @@ function useHashRoute() {
     return () => window.removeEventListener('hashchange', update);
   }, []);
   return route;
-}
-
-function useQueueData() {
-  const [queue, setQueue] = useState(() => apiConfig.configured ? null : demoQueue());
-  const [loading, setLoading] = useState(apiConfig.configured);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState(apiConfig.configured ? '' : 'โหมดสาธิต · ตั้งค่า VITE_API_URL เพื่อเชื่อมต่อ Google Apps Script');
-  const refreshInFlight = useRef(false);
-  const refresh = useCallback(async () => {
-    if (!apiConfig.configured || refreshInFlight.current) return;
-    refreshInFlight.current = true;
-    setRefreshing(true);
-    try { setQueue(await apiRequest('getQueue')); setError(''); }
-    catch (err) { setError(err.message); setQueue(current => current || demoQueue()); }
-    finally { setLoading(false); setRefreshing(false); refreshInFlight.current = false; }
-  }, []);
-  useEffect(() => {
-    refresh();
-    if (!apiConfig.configured) return undefined;
-    const timer = window.setInterval(refresh, 15000);
-    return () => window.clearInterval(timer);
-  }, [refresh]);
-  return { queue, setQueue, loading, refreshing, error, refresh };
 }
 
 function Shell({ children, title = '', role = '', simple = false }) {
@@ -363,33 +343,31 @@ function FigmaQueue({ queueData, actions, loading, error }) {
 }
 
 function FigmaDashboard({ queueData, loading, error }) {
-  const [metrics, setMetrics] = useState(null);
-  useEffect(() => { if (apiConfig.configured) apiRequest('getDashboard').then(setMetrics).catch(() => {}); }, []);
   const all = queueData?.tickets || [];
-  const total = metrics?.total ?? (all.length || 12387);
-  const averageWait = metrics?.averageWaitMinutes || 15;
-  const averageService = metrics?.averageServiceMinutes || 28;
-  const bars = [
-    { label: 'เวชระเบียน', users: 116, minutes: 82 },
-    { label: 'คัดกรอง', users: 124, minutes: 70 },
-    { label: 'พบแพทย์', users: 132, minutes: 100 },
-    { label: 'ทำแผล', users: 84, minutes: 70 },
-    { label: 'รับยา', users: 96, minutes: 35 },
-  ];
-  return <FigmaAdminFrame active="dashboard" title="Dashboard" action={<button className="figma-export" onClick={() => navigate('/report')}>ส่งออกรายงาน <span>↥</span></button>}>
-    <StatusBanner error={error} />
+  const { metrics, loading: metricsLoading, error: metricsError, refresh: refreshMetrics } = useDashboardMetrics();
+  const fallback = useMemo(() => buildDashboardFallback(all), [all]);
+  const { source: data, bars, hourly, peakMax } = useMemo(
+    () => buildDashboardViewModel(metrics || fallback, all),
+    [metrics, fallback, all]
+  );
+  const dashboardError = error || metricsError;
+  const dashboardLoading = loading || metricsLoading;
+  const updatedAt = formatDashboardUpdatedAt(metrics?.generatedAt);
+
+  return <FigmaAdminFrame active="dashboard" title="Dashboard" action={<div className="figma-dashboard-actions"><button className="figma-refresh" disabled={dashboardLoading} onClick={refreshMetrics}>{dashboardLoading ? 'กำลังโหลด...' : 'รีเฟรช'}</button><button className="figma-export" onClick={() => navigate('/report')}>ส่งออกรายงาน <span>↥</span></button></div>}>
+    <StatusBanner error={dashboardError} />
     <section className="figma-dashboard-layout">
       <div className="figma-chart-card">
         <h2>ระยะเวลา และ ปริมาณผู้เข้าใช้บริการในแต่ละจุดบริการ</h2>
-        <div className="figma-chart-toolbar"><span>เดือน มิถุนายน⌄</span><div><i className="legend-users" />ผู้รับบริการ <i className="legend-time" />ระยะเวลา (นาที)</div></div>
-        <div className="figma-bars">{bars.map(bar => <div className="figma-bar-group" key={bar.label}><div className="figma-bar-pair"><span className="bar-users" style={{ height: `${bar.users}%` }} /><span className="bar-time" style={{ height: `${bar.minutes}%` }} /></div><strong>{bar.label}</strong></div>)}</div>
+        <div className="figma-chart-toolbar"><span>วันนี้ · {data.total ?? 0} รายการ</span><div><i className="legend-users" />ผู้รับบริการ <i className="legend-time" />ระยะเวลา (นาที)</div></div>
+        <div className="figma-bars">{bars.map(bar => <div className="figma-bar-group" key={bar.label}><div className="figma-bar-pair"><span className="bar-users" style={{ height: `${bar.usersHeight}%` }} /><span className="bar-time" style={{ height: `${bar.minutesHeight}%` }} /></div><strong>{bar.label}</strong></div>)}</div>
       </div>
-      <div className="figma-peak-card"><h2>ช่วงเวลาที่หนาแน่น</h2>{['8:00', '9:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'].map((time, index) => <div className="peak-row" key={time}><span>{time}</span><i style={{ opacity: 0.35 + ((index % 5) * 0.13) }} /></div>)}</div>
-      <div className="figma-stat-card"><span>จำนวนผู้เข้าใช้บริการ</span><strong>{Number(total).toLocaleString()}</strong></div>
-      <div className="figma-stat-card"><span>ระยะเวลาการรอเฉลี่ย</span><strong>{averageWait}<small> นาที</small></strong></div>
-      <div className="figma-stat-card"><span>ระยะเวลาการให้บริการ</span><strong>{averageService}<small> นาที</small></strong></div>
+      <div className="figma-peak-card"><h2>ช่วงเวลาที่หนาแน่น</h2>{hourly.map(item => <div className="peak-row" key={item.hour}><span>{String(item.hour).padStart(2, '0')}:00</span><i style={{ opacity: 0.25 + ((Number(item.users) || 0) / peakMax) * 0.75 }} /></div>)}</div>
+      <div className="figma-stat-card"><span>จำนวนผู้เข้าใช้บริการ</span><strong>{Number(data.total || 0).toLocaleString()}</strong></div>
+      <div className="figma-stat-card"><span>ระยะเวลาการรอเฉลี่ย</span><strong>{Number(data.averageWaitMinutes || 0)}<small> นาที</small></strong></div>
+      <div className="figma-stat-card"><span>ระยะเวลาการให้บริการ</span><strong>{Number(data.averageServiceMinutes || 0)}<small> นาที</small></strong></div>
     </section>
-    <p className="figma-data-note">{loading ? 'กำลังโหลดข้อมูล...' : 'ข้อมูลอัปเดตจาก Google Sheets ผ่าน Apps Script'}</p>
+    <p className="figma-data-note">{dashboardLoading ? 'กำลังโหลดข้อมูล...' : updatedAt ? `อัปเดตล่าสุด ${updatedAt} · จาก PostgreSQL API` : 'โหมดสาธิต · ยังไม่ได้เชื่อมต่อ API'}</p>
   </FigmaAdminFrame>;
 }
 
@@ -422,16 +400,6 @@ function Operator({ queueData, actions, loading, error }) {
   const active = all.filter(t => ['waiting', 'called', 'serving'].includes(t.status));
   const skipped = all.filter(t => t.status === 'skipped');
   return <PlainDisplayShell><section className="hero admin-hero"><div className="hero-inner"><h1>ระบบจัดลำดับการใช้บริการสถานพยาบาล</h1><p>Kasetsart University Kampangsan Campus</p></div></section><main className="admin-page"><StatusBanner error={error} /><div className="admin-toolbar"><span>คิววันนี้ · {active.length + skipped.length} รายการ</span><button className="button primary" disabled={loading} onClick={actions.callNext}>เรียกคิวถัดไป</button></div><div className="admin-grid">{active.map(ticket => <AdminQueueCard key={ticket.id} ticket={ticket} actions={actions} />)}</div>{skipped.length > 0 && <section className="skipped-panel"><h2>คิวที่ถูกข้าม · เรียกซ้ำภายหลัง</h2><div className="skipped-list">{skipped.map(ticket => <div key={ticket.id}><strong>{ticket.ticketCode}</strong><span>{CATEGORY[ticket.category]?.label}</span><button className="button secondary small" onClick={() => actions.recall(ticket)}>เรียกซ้ำ</button></div>)}</div></section>}</main></PlainDisplayShell>;
-}
-
-function Metric({ label, value, tone = '' }) { return <div className={`metric ${tone}`}><span>{label}</span><strong>{value}</strong></div>; }
-
-function Dashboard({ queueData, loading, error }) {
-  const [metrics, setMetrics] = useState(null);
-  useEffect(() => { if (apiConfig.configured) apiRequest('getDashboard').then(setMetrics).catch(() => {}); }, []);
-  const all = queueData?.tickets || [];
-  const values = metrics || { waiting: all.filter(t => t.status === 'waiting').length, completed: all.filter(t => t.status === 'completed').length, skipped: all.filter(t => t.status === 'skipped').length, emergency: all.filter(t => t.category === 'emergency').length };
-  return <Shell title="Dashboard" role="Admin"><main className="backoffice-page"><aside className="side-nav"><strong>HealthFlow<br />Admin</strong><button className="active">▦ Dashboard</button><button onClick={() => navigate('/operator')}>▤ Live Queue</button><button>⌖ Service Zones</button><button>♙ Staffing</button><button>⇄ Patient Flow</button><button>▤ Reports</button><div /><button>◌ Support</button><button onClick={() => navigate('/')}>↪ Sign Out</button></aside><section className="backoffice-content"><StatusBanner error={error} /><div className="backoffice-heading"><div><span className="eyebrow">HEALTHFLOW ADMIN</span><h1>Dashboard</h1><p>Medical facility Kasetsart University Kampangsan Saen Medical Clinic</p></div><button className="button primary">ส่งออกรายงาน</button></div><div className="metric-grid"><Metric label="จำนวนผู้ใช้บริการรวม" value={values.total ?? values.waiting + values.completed} /><Metric label="เวลารอเฉลี่ย" value="12 นาที" tone="amber" /><Metric label="คิวฉุกเฉิน" value={values.emergency} tone="red" /><Metric label="เสร็จสิ้นวันนี้" value={values.completed} tone="green" /></div><section className="dashboard-card modern-chart"><h2>ปริมาณผู้รับบริการ และ ระยะเวลาเฉลี่ยตามจุดบริการ</h2><div className="fake-chart">{[42,68,50,84,58,36,61].map((height, i) => <span key={i} style={{ height: `${height}%` }} />)}</div></section><section className="dashboard-card efficiency"><h2>ตารางประสิทธิภาพสถานีบริการ</h2>{['Registration', 'Screening', 'Triage', 'Doctor Visit', 'Pharmacy'].map((name, i) => <div key={name}><b>{i + 1}. {name}</b><span>{240 - i * 17} คน</span><span>{(3.2 + i * 1.7).toFixed(1)} นาที</span><em className={i === 3 ? 'busy' : ''}>{i === 3 ? 'Bottleneck' : 'Optimal'}</em></div>)}</section><p className="tiny">{loading ? 'กำลังโหลดข้อมูล...' : 'ข้อมูลอัปเดตจาก Google Sheets ผ่าน Apps Script'}</p></section></main></Shell>;
 }
 
 function App() {

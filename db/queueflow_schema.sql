@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS queue_tickets (
   queue_date        date        NOT NULL DEFAULT current_date,
   prefix            varchar(10) NOT NULL DEFAULT 'A',
   sequence_no       integer     NOT NULL CHECK (sequence_no > 0),
-  queue_code        text GENERATED ALWAYS AS (prefix || lpad(sequence_no::text, 3, '0')) STORED,
+  -- sequence_no is an internal monotonic number; queue_code is the visible
+  -- three-digit ticket number and wraps from 999 back to 001.
+  queue_code        text GENERATED ALWAYS AS (prefix || lpad((((sequence_no - 1) % 999) + 1)::text, 3, '0')) STORED,
   category          varchar(20) NOT NULL DEFAULT 'general' CHECK (category IN ('general', 'emergency')),
   phone             varchar(30),
   status            queue_status NOT NULL DEFAULT 'waiting',
@@ -51,6 +53,12 @@ CREATE TABLE IF NOT EXISTS queue_events (
 
 ALTER TABLE queue_tickets ADD COLUMN IF NOT EXISTS category varchar(20) NOT NULL DEFAULT 'general';
 ALTER TABLE queue_tickets ADD COLUMN IF NOT EXISTS phone varchar(30);
+-- Rebuild the generated display code so existing databases also get the
+-- 001-999 cycle. sequence_no remains unique and keeps increasing internally.
+ALTER TABLE queue_tickets DROP COLUMN IF EXISTS queue_code;
+ALTER TABLE queue_tickets
+  ADD COLUMN queue_code text GENERATED ALWAYS AS
+    (prefix || lpad((((sequence_no - 1) % 999) + 1)::text, 3, '0')) STORED;
 ALTER TABLE queue_events DROP CONSTRAINT IF EXISTS queue_events_action_check;
 ALTER TABLE queue_events ADD CONSTRAINT queue_events_action_check
   CHECK (action IN ('issued', 'called', 'recalled', 'done', 'skipped', 'requeued', 'cancelled', 'reset'));

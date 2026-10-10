@@ -241,7 +241,13 @@ async function requeueTicket(queue) {
       `UPDATE queue_tickets
        SET status = 'waiting', counter = NULL, called_at = NULL, skipped_at = NULL,
            requeue_count = requeue_count + 1, updated_at = now()
-       WHERE queue_date = CURRENT_DATE AND queue_code = $1 AND status = 'skipped'
+       WHERE id = (
+         SELECT id
+         FROM queue_tickets
+         WHERE queue_date = CURRENT_DATE AND queue_code = $1 AND status = 'skipped'
+         ORDER BY id DESC
+         LIMIT 1
+       )
        RETURNING id, queue_code AS queue`,
       [queue]
     );
@@ -377,16 +383,84 @@ async function getQueueData() {
 }
 
 async function getDashboard() {
-  const result = await pool.query(
-    `SELECT COUNT(*)::int AS total,
-            COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (called_at - created_at)) / 60)
-              FILTER (WHERE called_at IS NOT NULL)), 0)::int AS "averageWaitMinutes",
-            COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (completed_at - called_at)) / 60)
-              FILTER (WHERE completed_at IS NOT NULL)), 0)::int AS "averageServiceMinutes"
-     FROM queue_tickets
-     WHERE queue_date = CURRENT_DATE`
-  );
-  return result.rows[0];
+  const [summaryResult, hourlyResult, stationResult] = await Promise.all([
+    pool.query(
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE status = 'waiting')::int AS waiting,
+              COUNT(*) FILTER (WHERE status = 'called')::int AS calling,
+              COUNT(*) FILTER (WHERE status = 'done')::int AS completed,
+              COUNT(*) FILTER (WHERE status = 'skipped')::int AS skipped,
+              COUNT(*) FILTER (WHERE status = 'cancelled')::int AS cancelled,
+              COUNT(*) FILTER (WHERE category = 'general')::int AS general,
+              COUNT(*) FILTER (WHERE category = 'emergency')::int AS emergency,
+              COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (called_at - created_at)) / 60)
+                FILTER (WHERE called_at IS NOT NULL)), 0)::int AS "averageWaitMinutes",
+              COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (completed_at - called_at)) / 60)
+                FILTER (WHERE completed_at IS NOT NULL)), 0)::int AS "averageServiceMinutes"
+       FROM queue_tickets
+       WHERE queue_date = CURRENT_DATE`
+    ),
+    pool.query(
+      `WITH hours AS (
+         SELECT generate_series(8, 19) AS hour
+       )
+       SELECT hours.hour::int AS hour,
+              COUNT(t.id)::int AS users,
+              COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (t.called_at - t.created_at)) / 60)
+                FILTER (WHERE t.called_at IS NOT NULL)), 0)::int AS "averageWaitMinutes",
+              COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (t.completed_at - t.called_at)) / 60)
+                FILTER (WHERE t.completed_at IS NOT NULL)), 0)::int AS "averageServiceMinutes"
+       FROM hours
+       LEFT JOIN queue_tickets t
+         ON t.queue_date = CURRENT_DATE
+        AND EXTRACT(HOUR FROM t.created_at AT TIME ZONE 'Asia/Bangkok') = hours.hour
+       GROUP BY hours.hour
+       ORDER BY hours.hour`
+    ),
+    pool.query(
+      `SELECT COALESCE(counter, 'ไม่ระบุ') AS station,
+              COUNT(*) FILTER (WHERE called_at IS NOT NULL)::int AS served,
+              COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (called_at - created_at)) / 60)
+                FILTER (WHERE called_at IS NOT NULL)), 0)::int AS "averageWaitMinutes",
+              COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (completed_at - called_at)) / 60)
+                FILTER (WHERE completed_at IS NOT NULL)), 0)::int AS "averageServiceMinutes"
+       FROM queue_tickets
+       WHERE queue_date = CURRENT_DATE
+       GROUP BY counter
+       ORDER BY served DESC, station`
+    )
+  ]);
+
+  const summary = summaryResult.rows[0] || {};
+  const hourly = hourlyResult.rows.map(row => ({
+    hour: Number(row.hour),
+    users: Number(row.users || 0),
+    averageWaitMinutes: Number(row.averageWaitMinutes || 0),
+    averageServiceMinutes: Number(row.averageServiceMinutes || 0)
+  }));
+  const stations = stationResult.rows.map(row => ({
+    station: row.station,
+    served: Number(row.served || 0),
+    averageWaitMinutes: Number(row.averageWaitMinutes || 0),
+    averageServiceMinutes: Number(row.averageServiceMinutes || 0)
+  }));
+
+  return {
+    ...summary,
+    total: Number(summary.total || 0),
+    waiting: Number(summary.waiting || 0),
+    calling: Number(summary.calling || 0),
+    completed: Number(summary.completed || 0),
+    skipped: Number(summary.skipped || 0),
+    cancelled: Number(summary.cancelled || 0),
+    general: Number(summary.general || 0),
+    emergency: Number(summary.emergency || 0),
+    averageWaitMinutes: Number(summary.averageWaitMinutes || 0),
+    averageServiceMinutes: Number(summary.averageServiceMinutes || 0),
+    hourly,
+    stations,
+    generatedAt: new Date().toISOString()
+  };
 }
 
 async function getStatus() {
