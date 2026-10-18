@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
 import { apiConfig, apiRequest, demoQueue } from './api.js';
 import generalQueueBg from './assets/queue-general-bg.png';
 import emergencyQueueBg from './assets/queue-emergency-bg.png';
@@ -169,10 +169,10 @@ function Kiosk({ onCreate }) {
       <div className="kiosk-panel-head"><strong>เลือกบริการที่ต้องการ</strong></div>
       <div className="kiosk-options">{Object.entries(CATEGORY).map(([key, item]) => <button key={key} className={`kiosk-option ${category === key ? 'selected' : ''}`} onClick={() => setCategory(key)}><span className="kiosk-icon">{item.icon}</span><strong>{item.label}</strong></button>)}</div>
       <button className="kiosk-confirm" disabled={!category || busy} onClick={submit}>{busy ? 'กำลังออกคิว...' : 'ยืนยัน'}</button>
-      {success && <div className="kiosk-success" role="status">
+      {success && <output className="kiosk-success">
         <span>ออกบัตรคิวสำเร็จ · หมายเลข {success.ticketCode}</span>
         <button className="print-ticket-button" type="button" onClick={() => window.print()}>พิมพ์บัตรคิว</button>
-      </div>}
+      </output>}
       <p className="kiosk-note">คิวฉุกเฉินสามารถถูกจัดลำดับก่อนโดยเจ้าหน้าที่ และคิวที่ถูกข้ามจะถูกเรียกซ้ำภายหลัง</p>
     </section></main>
     {success && <section className="print-ticket" aria-hidden="true">
@@ -290,7 +290,11 @@ function FigmaQueue({ queueData, actions, loading, error }) {
     .sort((a, b) => (Number(b.priority) || 0) - (Number(a.priority) || 0) || (Number(a.sequenceNo) || 0) - (Number(b.sequenceNo) || 0));
   const skipped = active.filter(ticket => ticket.status === 'skipped');
   const upcoming = waiting.slice(0, 4);
-  const statusLabel = ticket => ticket.status === 'waiting' ? 'รอเรียก' : ticket.status === 'called' || ticket.status === 'serving' ? 'กำลังดำเนินการ' : 'ข้ามคิว';
+  const statusLabel = ticket => {
+    if (ticket.status === 'waiting') return 'รอเรียก';
+    if (ticket.status === 'called' || ticket.status === 'serving') return 'กำลังดำเนินการ';
+    return 'ข้ามคิว';
+  };
   async function handleCallNext() {
     try {
       const ticket = await actions.callNext();
@@ -353,6 +357,9 @@ function FigmaDashboard({ queueData, loading, error }) {
   const dashboardError = error || metricsError;
   const dashboardLoading = loading || metricsLoading;
   const updatedAt = formatDashboardUpdatedAt(metrics?.generatedAt);
+  let dashboardNote = 'โหมดสาธิต · ยังไม่ได้เชื่อมต่อ API';
+  if (dashboardLoading) dashboardNote = 'กำลังโหลดข้อมูล...';
+  else if (updatedAt) dashboardNote = `อัปเดตล่าสุด ${updatedAt} · จาก PostgreSQL API`;
 
   return <FigmaAdminFrame active="dashboard" title="Dashboard" action={<div className="figma-dashboard-actions"><button className="figma-refresh" disabled={dashboardLoading} onClick={refreshMetrics}>{dashboardLoading ? 'กำลังโหลด...' : 'รีเฟรช'}</button><button className="figma-export" onClick={() => navigate('/report')}>ส่งออกรายงาน <span>↥</span></button></div>}>
     <StatusBanner error={dashboardError} />
@@ -367,7 +374,7 @@ function FigmaDashboard({ queueData, loading, error }) {
       <div className="figma-stat-card"><span>ระยะเวลาการรอเฉลี่ย</span><strong>{Number(data.averageWaitMinutes || 0)}<small> นาที</small></strong></div>
       <div className="figma-stat-card"><span>ระยะเวลาการให้บริการ</span><strong>{Number(data.averageServiceMinutes || 0)}<small> นาที</small></strong></div>
     </section>
-    <p className="figma-data-note">{dashboardLoading ? 'กำลังโหลดข้อมูล...' : updatedAt ? `อัปเดตล่าสุด ${updatedAt} · จาก PostgreSQL API` : 'โหมดสาธิต · ยังไม่ได้เชื่อมต่อ API'}</p>
+    <p className="figma-data-note">{dashboardNote}</p>
   </FigmaAdminFrame>;
 }
 
@@ -404,7 +411,7 @@ function Operator({ queueData, actions, loading, error }) {
 
 function App() {
   const route = useHashRoute();
-  const [, refreshAuth] = useState(0);
+  const [, refreshAuth] = useReducer(version => version + 1, 0);
   useEffect(() => {
     const onAuthChanged = () => refreshAuth(version => version + 1);
     window.addEventListener('queueflow-auth-changed', onAuthChanged);
@@ -444,7 +451,10 @@ function App() {
     const updatedTicket = { ...ticket, status: nextStatus, updatedAt };
     if (nextStatus === 'called') updatedTicket.calledAt = updatedAt;
     if (nextStatus === 'skipped') updatedTicket.skippedAt = updatedAt;
-    return { ticket: updatedTicket, queue: { ...prev, tickets: prev.tickets.map(item => item.id === ticket.id ? updatedTicket : item), current: nextStatus === 'called' ? updatedTicket : (prev.current?.id === ticket.id ? null : prev.current) } };
+    let nextCurrent = prev.current;
+    if (nextStatus === 'called') nextCurrent = updatedTicket;
+    else if (prev.current?.id === ticket.id) nextCurrent = null;
+    return { ticket: updatedTicket, queue: { ...prev, tickets: prev.tickets.map(item => item.id === ticket.id ? updatedTicket : item), current: nextCurrent } };
   }), [mutate]);
   const actions = useMemo(() => ({
     callNext: () => mutate('callNext', {}, prev => {
