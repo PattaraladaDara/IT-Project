@@ -60,8 +60,61 @@ ALTER TABLE queue_tickets
   ADD COLUMN queue_code text GENERATED ALWAYS AS
     (prefix || lpad((((sequence_no - 1) % 999) + 1)::text, 3, '0')) STORED;
 ALTER TABLE queue_events DROP CONSTRAINT IF EXISTS queue_events_action_check;
+ALTER TABLE queue_events ALTER COLUMN action TYPE varchar(40);
 ALTER TABLE queue_events ADD CONSTRAINT queue_events_action_check
-  CHECK (action IN ('issued', 'called', 'recalled', 'done', 'skipped', 'requeued', 'cancelled', 'reset'));
+  CHECK (action IN ('issued', 'called', 'recalled', 'done', 'skipped', 'requeued', 'cancelled', 'reset', 'routed', 'prescription_received', 'medicine_ready'));
+
+-- Service-point workflow. These objects extend the original one-queue model
+-- without removing tickets or their event history.
+CREATE TABLE IF NOT EXISTS service_points (
+  point_no      smallint PRIMARY KEY,
+  name          varchar(100) NOT NULL,
+  is_active     boolean NOT NULL DEFAULT true,
+  updated_at    timestamptz NOT NULL DEFAULT now(),
+  CHECK (point_no IN (1, 3, 4, 6, 7))
+);
+
+INSERT INTO service_points (point_no, name) VALUES
+  (1, 'เวชระเบียนและวัดค่าพื้นฐาน'),
+  (3, 'คัดกรอง'),
+  (4, 'พบแพทย์'),
+  (6, 'ส่งใบสั่งยาและรับยา'),
+  (7, 'ทำแผล')
+ON CONFLICT (point_no) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS ticket_service_steps (
+  id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  ticket_id       bigint NOT NULL REFERENCES queue_tickets(id) ON DELETE RESTRICT,
+  service_point   smallint NOT NULL REFERENCES service_points(point_no),
+  step_status     varchar(24) NOT NULL DEFAULT 'waiting'
+                  CHECK (step_status IN ('waiting', 'called', 'preparing', 'ready', 'completed', 'paused', 'skipped')),
+  route_order     smallint NOT NULL DEFAULT 1,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  called_at       timestamptz,
+  completed_at    timestamptz,
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE queue_tickets ADD COLUMN IF NOT EXISTS current_service_point smallint;
+ALTER TABLE queue_tickets ADD COLUMN IF NOT EXISTS care_plan varchar(20);
+
+-- Existing live tickets continue at point 1 after the migration. Completed
+-- and cancelled tickets intentionally do not receive a new active step.
+INSERT INTO ticket_service_steps (ticket_id, service_point, step_status, route_order, created_at)
+SELECT t.id, 1,
+       CASE WHEN t.status = 'called' THEN 'called' ELSE 'waiting' END,
+       1, t.created_at
+FROM queue_tickets t
+WHERE t.status IN ('waiting', 'called', 'skipped')
+  AND NOT EXISTS (SELECT 1 FROM ticket_service_steps s WHERE s.ticket_id = t.id);
+
+UPDATE queue_tickets
+SET current_service_point = 1
+WHERE current_service_point IS NULL
+  AND status IN ('waiting', 'called', 'skipped');
+
+CREATE INDEX IF NOT EXISTS ticket_service_steps_queue_idx
+  ON ticket_service_steps (service_point, step_status, created_at, id);
 
 CREATE TABLE IF NOT EXISTS app_users (
   id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

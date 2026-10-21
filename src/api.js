@@ -35,9 +35,9 @@ export function demoQueue() {
   return {
     date: now.slice(0, 10),
     tickets: [
-      { id: 'demo-1', ticketCode: 'Q001', category: 'general', categoryLabel: 'ผู้ป่วยทั่วไป', priority: 10, status: 'waiting', sequenceNo: 1, issuedAt: now },
-      { id: 'demo-2', ticketCode: 'Q002', category: 'general', categoryLabel: 'ผู้ป่วยทั่วไป', priority: 10, status: 'waiting', sequenceNo: 2, issuedAt: now },
-      { id: 'demo-3', ticketCode: 'Q003', category: 'emergency', categoryLabel: 'ผู้ป่วยฉุกเฉิน', priority: 100, status: 'waiting', sequenceNo: 3, issuedAt: now },
+      { id: 'demo-1', ticketCode: 'Q001', category: 'general', categoryLabel: 'ผู้ป่วยทั่วไป', priority: 10, status: 'waiting', sequenceNo: 1, issuedAt: now, arrivedAt: now, currentPoint: 1 },
+      { id: 'demo-2', ticketCode: 'Q002', category: 'general', categoryLabel: 'ผู้ป่วยทั่วไป', priority: 10, status: 'waiting', sequenceNo: 2, issuedAt: now, arrivedAt: now, currentPoint: 1 },
+      { id: 'demo-3', ticketCode: 'Q003', category: 'emergency', categoryLabel: 'ผู้ป่วยฉุกเฉิน', priority: 100, status: 'waiting', sequenceNo: 3, issuedAt: now, arrivedAt: now, currentPoint: 1 },
     ],
     current: null,
     waiting: [],

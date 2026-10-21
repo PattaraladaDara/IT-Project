@@ -1,4 +1,4 @@
-const DEFAULT_COUNTER = '2';
+const DEFAULT_COUNTER = '1';
 
 function getThaiVoice() {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
@@ -33,12 +33,13 @@ export function speakQueue(ticket, counter = DEFAULT_COUNTER) {
   const Utterance = window.SpeechSynthesisUtterance;
   if (!Utterance) return false;
   const queueCode = spellQueue(ticket.ticketCode)
+  const point = ticket.currentPoint || ticket.servicePoint || counter;
   const utterance = new Utterance(`ขอเชิญหมายเลข
     ${queueCode} 
-    ที่ช่องหมายเลข 
-    ${counter}`);;
+    ที่จุดบริการ
+    ${point}`);;
   utterance.lang = 'th-TH';
-  utterance.rate = 0.65;
+  utterance.rate = 0.55;
   utterance.pitch = 1;
   const voice = getThaiVoice();
   if (voice) utterance.voice = voice;

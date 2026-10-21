@@ -29,7 +29,7 @@ export function useQueueData() {
     refresh();
     if (!apiConfig.configured) return undefined;
 
-    const timer = window.setInterval(refresh, 15000);
+    const timer = window.setInterval(refresh, 3000);
     return () => window.clearInterval(timer);
   }, [refresh]);
 

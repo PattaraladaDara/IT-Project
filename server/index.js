@@ -129,12 +129,19 @@ async function takeTicket(prefix, category = 'general', phone = null) {
       [prefix, sequenceNo, category, phone, category === 'emergency' ? 9 : 1]
     );
     const ticket = ticketResult.rows[0];
+    await client.query(
+      `INSERT INTO ticket_service_steps (ticket_id, service_point, step_status, route_order)
+       VALUES ($1, 1, 'waiting', 1)`,
+      [ticket.id]
+    );
+    await client.query(`UPDATE queue_tickets SET current_service_point = 1 WHERE id = $1`, [ticket.id]);
     await addEvent(client, ticket.id, 'issued', null, { prefix });
 
     const waitingResult = await client.query(
       `SELECT COUNT(*)::int AS count
-       FROM queue_tickets
-       WHERE queue_date = CURRENT_DATE AND status = 'waiting'`
+       FROM ticket_service_steps s
+       JOIN queue_tickets t ON t.id = s.ticket_id
+       WHERE t.queue_date = CURRENT_DATE AND s.service_point = 1 AND s.step_status = 'waiting'`
     );
 
     return {
@@ -146,7 +153,7 @@ async function takeTicket(prefix, category = 'general', phone = null) {
   });
 }
 
-async function callNext(counter) {
+async function legacyCallNext(counter) {
   return inTransaction(async (client) => {
     const current = await client.query(
       `SELECT id, queue_code AS queue
@@ -338,6 +345,155 @@ async function cancelTicket(ticketId) {
   });
 }
 
+const SERVICE_POINTS = {
+  1: 'เวชระเบียนและวัดค่าพื้นฐาน',
+  3: 'คัดกรอง',
+  4: 'พบแพทย์',
+  6: 'ส่งใบสั่งยาและรับยา',
+  7: 'ทำแผล'
+};
+
+function cleanServicePoint(value) {
+  const point = Number.parseInt(String(value || ''), 10);
+  if (!SERVICE_POINTS[point]) throw new Error('จุดบริการไม่ถูกต้อง');
+  return point;
+}
+
+async function addStep(client, ticketId, point, status = 'waiting', order = 1) {
+  await client.query(
+    `INSERT INTO ticket_service_steps (ticket_id, service_point, step_status, route_order)
+     VALUES ($1, $2, $3, $4)`, [ticketId, point, status, order]
+  );
+}
+
+async function callNext(counter, requestedPoint = null) {
+  const point = requestedPoint || cleanServicePoint(counter);
+  return inTransaction(async (client) => {
+    const current = await client.query(
+      `SELECT t.id, t.queue_code AS queue
+       FROM queue_tickets t JOIN ticket_service_steps s ON s.ticket_id = t.id
+       WHERE t.queue_date = CURRENT_DATE AND s.service_point = $1 AND s.step_status = 'called'
+       LIMIT 1 FOR UPDATE`, [point]
+    );
+    if (current.rows.length) return { error: `กรุณาดำเนินการกับคิว ${current.rows[0].queue} ที่จุดบริการ ${point} ให้เสร็จก่อน` };
+    const next = await client.query(
+      `SELECT s.id AS step_id, t.id, t.queue_code AS queue
+       FROM ticket_service_steps s
+       JOIN queue_tickets t ON t.id = s.ticket_id
+       WHERE t.queue_date = CURRENT_DATE AND t.status = 'waiting' AND s.service_point = $1 AND s.step_status = 'waiting'
+       ORDER BY s.created_at ASC, s.id ASC
+       LIMIT 1 FOR UPDATE SKIP LOCKED`, [point]
+    );
+    if (!next.rows.length) return { error: `ไม่มีคิวรอเรียกที่จุดบริการ ${point}` };
+    await client.query(`UPDATE ticket_service_steps SET step_status = 'called', called_at = now(), updated_at = now() WHERE id = $1`, [next.rows[0].step_id]);
+    await client.query(
+      `UPDATE queue_tickets
+       SET status = 'called', counter = $1, current_service_point = $2,
+           called_at = now(), call_count = call_count + 1
+       WHERE id = $3`,
+      [String(point), point, next.rows[0].id]
+    );
+    await addEvent(client, next.rows[0].id, 'called', String(point), { servicePoint: point });
+    return { ok: true, queue: next.rows[0].queue, servicePoint: point };
+  });
+}
+
+async function completeServiceStep(ticketId, point) {
+  return inTransaction(async (client) => {
+    const step = await client.query(
+      `SELECT s.id, t.queue_code AS queue FROM ticket_service_steps s
+       JOIN queue_tickets t ON t.id = s.ticket_id
+       WHERE s.ticket_id = $1 AND s.service_point = $2 AND s.step_status = 'called'
+       ORDER BY s.id DESC LIMIT 1 FOR UPDATE`, [ticketId, point]
+    );
+    if (!step.rows.length) return { error: 'ไม่พบคิวที่กำลังให้บริการ ณ จุดนี้' };
+    if (point === 3) return { error: 'กรุณาเลือกส่งต่อไปจุดบริการ 4 หรือจุดบริการ 7' };
+    if (point === 7) return { error: 'กรุณาเลือกส่งต่อไปจุดบริการ 4 หรือเสร็จสิ้นการรับบริการ' };
+    await client.query(`UPDATE ticket_service_steps SET step_status = 'completed', completed_at = now(), updated_at = now() WHERE id = $1`, [step.rows[0].id]);
+    let nextPoint = null;
+    if (point === 1) nextPoint = 3;
+    if (point === 4) nextPoint = 6;
+    if (nextPoint) {
+      await addStep(client, ticketId, nextPoint);
+      await client.query(`UPDATE queue_tickets SET status = 'waiting', counter = NULL, current_service_point = $1 WHERE id = $2`, [nextPoint, ticketId]);
+    } else {
+      await client.query(`UPDATE queue_tickets SET status = 'done', completed_at = now(), current_service_point = NULL WHERE id = $1`, [ticketId]);
+    }
+    await addEvent(client, ticketId, 'done', String(point), { servicePoint: point, nextPoint });
+    return { ok: true, queue: step.rows[0].queue, servicePoint: point };
+  });
+}
+
+async function routeServiceStep(ticketId, fromPoint, destination) {
+  const allowed = fromPoint === 3
+    ? [4, 7]
+    : fromPoint === 7 ? [4, 'complete'] : [];
+  if (!allowed.includes(destination)) throw new Error('เส้นทางส่งต่อไม่ถูกต้อง');
+  return inTransaction(async (client) => {
+    const step = await client.query(
+      `SELECT s.id, t.queue_code AS queue FROM ticket_service_steps s
+       JOIN queue_tickets t ON t.id = s.ticket_id
+       WHERE s.ticket_id = $1 AND s.service_point = $2 AND s.step_status = 'called'
+       ORDER BY s.id DESC LIMIT 1 FOR UPDATE`, [ticketId, fromPoint]
+    );
+    if (!step.rows.length) return { error: 'ไม่พบคิวที่กำลังให้บริการ ณ จุดนี้' };
+    await client.query(`UPDATE ticket_service_steps SET step_status = 'completed', completed_at = now(), updated_at = now() WHERE id = $1`, [step.rows[0].id]);
+    if (destination === 'complete') {
+      await client.query(`UPDATE queue_tickets SET status = 'done', counter = NULL, completed_at = now(), current_service_point = NULL WHERE id = $1`, [ticketId]);
+    } else {
+      await addStep(client, ticketId, destination);
+      await client.query(`UPDATE queue_tickets SET status = 'waiting', counter = NULL, current_service_point = $1 WHERE id = $2`, [destination, ticketId]);
+    }
+    await addEvent(client, ticketId, 'routed', String(fromPoint), { fromPoint, destination });
+    return { ok: true, queue: step.rows[0].queue, servicePoint: destination === 'complete' ? null : destination };
+  });
+}
+
+async function skipServiceStep(ticketId, point) {
+  return inTransaction(async (client) => {
+    const step = await client.query(
+      `SELECT s.id, t.queue_code AS queue FROM ticket_service_steps s
+       JOIN queue_tickets t ON t.id = s.ticket_id
+       WHERE s.ticket_id = $1 AND s.service_point = $2 AND s.step_status = 'called'
+       ORDER BY s.id DESC LIMIT 1 FOR UPDATE`, [ticketId, point]
+    );
+    if (!step.rows.length) return { error: 'ไม่พบคิวที่กำลังให้บริการ ณ จุดนี้' };
+    await client.query(`UPDATE ticket_service_steps SET step_status = 'skipped', updated_at = now() WHERE id = $1`, [step.rows[0].id]);
+    await client.query(`UPDATE queue_tickets SET status = 'skipped', skipped_at = now(), counter = NULL, current_service_point = $1 WHERE id = $2`, [point, ticketId]);
+    await addEvent(client, ticketId, 'skipped', String(point), { servicePoint: point });
+    return { ok: true, queue: step.rows[0].queue, servicePoint: point };
+  });
+}
+
+async function recallServiceStep(ticketId, point) {
+  return inTransaction(async (client) => {
+    const step = await client.query(
+      `SELECT s.id, t.queue_code AS queue FROM ticket_service_steps s
+       JOIN queue_tickets t ON t.id = s.ticket_id
+       WHERE s.ticket_id = $1 AND s.service_point = $2 AND s.step_status = 'skipped'
+       ORDER BY s.id DESC LIMIT 1 FOR UPDATE`, [ticketId, point]
+    );
+    if (!step.rows.length) return { error: 'ไม่พบคิวที่ข้ามไว้ ณ จุดนี้' };
+    const active = await client.query(`SELECT 1 FROM ticket_service_steps WHERE service_point = $1 AND step_status = 'called' LIMIT 1 FOR UPDATE`, [point]);
+    if (active.rows.length) return { error: `กรุณาดำเนินการกับคิวปัจจุบันที่จุดบริการ ${point} ให้เสร็จก่อน` };
+    await client.query(`UPDATE ticket_service_steps SET step_status = 'called', called_at = now(), updated_at = now() WHERE id = $1`, [step.rows[0].id]);
+    await client.query(
+      `UPDATE queue_tickets
+       SET status = 'called', counter = $1, called_at = now(),
+           current_service_point = $2, call_count = call_count + 1
+       WHERE id = $3`,
+      [String(point), point, ticketId]
+    );
+    await addEvent(client, ticketId, 'recalled', String(point), { servicePoint: point });
+    return { ok: true, queue: step.rows[0].queue, servicePoint: point };
+  });
+}
+
+async function getServicePoints() {
+  const result = await pool.query(`SELECT point_no AS "point", name FROM service_points ORDER BY point_no`);
+  return result.rows;
+}
+
 function categoryLabel(category) {
   return category === 'emergency' ? 'ผู้ป่วยฉุกเฉิน' : 'ผู้ป่วยทั่วไป';
 }
@@ -357,19 +513,67 @@ function mapTicketRow(row) {
     completedAt: row.completedAt,
     skippedAt: row.skippedAt,
     phone: row.phone || null,
-    counter: row.counter || null
+    counter: row.counter || null,
+    currentPoint: row.currentPoint ? Number(row.currentPoint) : null,
+    currentPointName: row.currentPointName || null,
+    stepStatus: row.stepStatus || null,
+    arrivedAt: row.arrivedAt || row.issuedAt,
+    carePlan: row.carePlan || null,
   };
 }
 
 async function getQueueData() {
   const result = await pool.query(
-    `SELECT id, queue_code AS "ticketCode", category, priority,
-            status, sequence_no AS "sequenceNo", created_at AS "issuedAt",
-            called_at AS "calledAt", completed_at AS "completedAt",
-            skipped_at AS "skippedAt", phone, counter
-     FROM queue_tickets
-     WHERE queue_date = CURRENT_DATE
-     ORDER BY created_at ASC, id ASC`
+    `SELECT t.id, t.queue_code AS "ticketCode", t.category, t.priority,
+            t.status, t.sequence_no AS "sequenceNo", t.created_at AS "issuedAt",
+            t.called_at AS "calledAt", t.completed_at AS "completedAt",
+            t.skipped_at AS "skippedAt", t.phone, t.counter,
+            t.current_service_point AS "currentPoint", sp.name AS "currentPointName",
+            active_step.step_status AS "stepStatus", active_step.created_at AS "arrivedAt",
+            t.care_plan AS "carePlan"
+     FROM queue_tickets t
+     LEFT JOIN service_points sp ON sp.point_no = t.current_service_point
+     LEFT JOIN LATERAL (
+       SELECT step_status, created_at FROM ticket_service_steps s
+       WHERE s.ticket_id = t.id AND s.step_status IN ('waiting', 'called', 'skipped')
+       ORDER BY s.id DESC LIMIT 1
+     ) active_step ON true
+     WHERE t.queue_date = CURRENT_DATE
+     ORDER BY t.created_at ASC, t.id ASC`
+  );
+  const historyResult = await pool.query(
+    `SELECT s.id AS "stepId", t.id AS "ticketId", t.queue_code AS "ticketCode",
+            t.category, s.service_point AS "currentPoint", s.completed_at AS "completedAt"
+     FROM ticket_service_steps s
+     JOIN queue_tickets t ON t.id = s.ticket_id
+     WHERE t.queue_date = CURRENT_DATE
+       AND s.step_status = 'completed'
+       AND s.completed_at IS NOT NULL
+       AND (
+         (
+           s.service_point = 4
+           AND EXISTS (
+             SELECT 1
+             FROM ticket_service_steps next_step
+             WHERE next_step.ticket_id = s.ticket_id
+               AND next_step.service_point = 6
+               AND next_step.id > s.id
+           )
+         )
+         OR
+         (
+           s.service_point = 7
+           AND t.status = 'done'
+           AND NOT EXISTS (
+             SELECT 1
+             FROM ticket_service_steps next_step
+             WHERE next_step.ticket_id = s.ticket_id
+               AND next_step.id > s.id
+           )
+         )
+       )
+     ORDER BY s.completed_at DESC, s.id DESC
+     LIMIT 10`
   );
   const tickets = result.rows.map(mapTicketRow);
   const current = tickets.find(ticket => ticket.status === 'called') || null;
@@ -378,7 +582,16 @@ async function getQueueData() {
     tickets,
     current,
     waiting: tickets.filter(ticket => ticket.status === 'waiting'),
-    skipped: tickets.filter(ticket => ticket.status === 'skipped')
+    skipped: tickets.filter(ticket => ticket.status === 'skipped'),
+    history: historyResult.rows.map(row => ({
+      id: `history-${row.stepId}`,
+      ticketId: String(row.ticketId),
+      ticketCode: row.ticketCode,
+      category: row.category,
+      currentPoint: Number(row.currentPoint),
+      completedAt: row.completedAt
+    })),
+    servicePoints: await getServicePoints()
   };
 }
 
@@ -393,10 +606,19 @@ async function getDashboard() {
               COUNT(*) FILTER (WHERE status = 'cancelled')::int AS cancelled,
               COUNT(*) FILTER (WHERE category = 'general')::int AS general,
               COUNT(*) FILTER (WHERE category = 'emergency')::int AS emergency,
-              COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (called_at - created_at)) / 60)
-                FILTER (WHERE called_at IS NOT NULL)), 0)::int AS "averageWaitMinutes",
-              COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (completed_at - called_at)) / 60)
-                FILTER (WHERE completed_at IS NOT NULL)), 0)::int AS "averageServiceMinutes"
+              COALESCE((
+                SELECT ROUND(AVG(EXTRACT(EPOCH FROM (step.called_at - step.created_at)) / 60))
+                FROM ticket_service_steps step
+                JOIN queue_tickets step_ticket ON step_ticket.id = step.ticket_id
+                WHERE step_ticket.queue_date = CURRENT_DATE AND step.called_at IS NOT NULL
+              ), 0)::int AS "averageWaitMinutes",
+              COALESCE((
+                SELECT ROUND(AVG(EXTRACT(EPOCH FROM (step.completed_at - step.called_at)) / 60))
+                FROM ticket_service_steps step
+                JOIN queue_tickets step_ticket ON step_ticket.id = step.ticket_id
+                WHERE step_ticket.queue_date = CURRENT_DATE
+                  AND step.called_at IS NOT NULL AND step.completed_at IS NOT NULL
+              ), 0)::int AS "averageServiceMinutes"
        FROM queue_tickets
        WHERE queue_date = CURRENT_DATE`
     ),
@@ -418,16 +640,23 @@ async function getDashboard() {
        ORDER BY hours.hour`
     ),
     pool.query(
-      `SELECT COALESCE(counter, 'ไม่ระบุ') AS station,
-              COUNT(*) FILTER (WHERE called_at IS NOT NULL)::int AS served,
-              COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (called_at - created_at)) / 60)
-                FILTER (WHERE called_at IS NOT NULL)), 0)::int AS "averageWaitMinutes",
-              COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (completed_at - called_at)) / 60)
-                FILTER (WHERE completed_at IS NOT NULL)), 0)::int AS "averageServiceMinutes"
-       FROM queue_tickets
-       WHERE queue_date = CURRENT_DATE
-       GROUP BY counter
-       ORDER BY served DESC, station`
+      `WITH today_steps AS (
+         SELECT step.*
+         FROM ticket_service_steps step
+         JOIN queue_tickets ticket ON ticket.id = step.ticket_id
+         WHERE ticket.queue_date = CURRENT_DATE
+       )
+       SELECT point.point_no::text AS station,
+              COUNT(step.id)::int AS served,
+              COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (step.called_at - step.created_at)) / 60)
+                FILTER (WHERE step.called_at IS NOT NULL)), 0)::int AS "averageWaitMinutes",
+              COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (step.completed_at - step.called_at)) / 60)
+                FILTER (WHERE step.called_at IS NOT NULL AND step.completed_at IS NOT NULL)), 0)::int AS "averageServiceMinutes"
+       FROM service_points point
+       LEFT JOIN today_steps step ON step.service_point = point.point_no
+       WHERE point.point_no IN (1, 3, 4, 6, 7)
+       GROUP BY point.point_no
+       ORDER BY point.point_no`
     )
   ]);
 
@@ -460,6 +689,57 @@ async function getDashboard() {
     hourly,
     stations,
     generatedAt: new Date().toISOString()
+  };
+}
+
+async function getReport(payload = {}) {
+  const allowedPeriods = new Set(['today', 'week', 'month', 'three-months', 'academic-year', 'year', 'custom']);
+  const period = allowedPeriods.has(payload.period) ? payload.period : 'month';
+  const customStart = String(payload.start || '');
+  const customEnd = String(payload.end || '');
+  if (period === 'custom') {
+    const validDate = /^\d{4}-\d{2}-\d{2}$/;
+    if (!validDate.test(customStart) || !validDate.test(customEnd) || customStart > customEnd) {
+      return { error: 'ช่วงวันที่ไม่ถูกต้อง กรุณาตรวจสอบวันเริ่มต้นและวันสิ้นสุด' };
+    }
+  }
+
+  const boundsResult = await pool.query(
+    `SELECT
+       CASE $1
+         WHEN 'today' THEN CURRENT_DATE
+         WHEN 'week' THEN date_trunc('week', CURRENT_DATE)::date
+         WHEN 'month' THEN date_trunc('month', CURRENT_DATE)::date
+         WHEN 'three-months' THEN (date_trunc('month', CURRENT_DATE) - INTERVAL '2 months')::date
+         WHEN 'academic-year' THEN make_date(
+           EXTRACT(YEAR FROM CURRENT_DATE)::int - CASE WHEN EXTRACT(MONTH FROM CURRENT_DATE)::int < 6 THEN 1 ELSE 0 END,
+           6, 1
+         )
+         WHEN 'year' THEN date_trunc('year', CURRENT_DATE)::date
+         WHEN 'custom' THEN $2::date
+       END AS "startDate",
+       CASE WHEN $1 = 'custom' THEN $3::date ELSE CURRENT_DATE END AS "endDate"`,
+    [period, period === 'custom' ? customStart : null, period === 'custom' ? customEnd : null]
+  );
+  const { startDate, endDate } = boundsResult.rows[0];
+  const result = await pool.query(
+    `SELECT t.id, t.queue_code AS "ticketCode", t.category, t.priority,
+            t.status, t.sequence_no AS "sequenceNo", t.created_at AS "issuedAt",
+            t.called_at AS "calledAt", t.completed_at AS "completedAt",
+            t.skipped_at AS "skippedAt", t.phone, t.counter,
+            t.current_service_point AS "currentPoint", sp.name AS "currentPointName",
+            t.care_plan AS "carePlan"
+     FROM queue_tickets t
+     LEFT JOIN service_points sp ON sp.point_no = t.current_service_point
+     WHERE t.queue_date BETWEEN $1::date AND $2::date
+     ORDER BY t.queue_date ASC, t.created_at ASC, t.id ASC`,
+    [startDate, endDate]
+  );
+  return {
+    period,
+    startDate,
+    endDate,
+    tickets: result.rows.map(mapTicketRow)
   };
 }
 
@@ -540,13 +820,17 @@ function readBody(req) {
 }
 
 async function runReactAction(action, payload) {
-  const counter = cleanCounter(payload.counter || payload.operatorId || '2');
+  const counter = cleanCounter(payload.counter || payload.operatorId || '1');
   let result;
   switch (action) {
     case 'getQueue':
       return getQueueData();
     case 'getDashboard':
       return getDashboard();
+    case 'getReport':
+      return getReport(payload);
+    case 'getServicePoints':
+      return { servicePoints: await getServicePoints() };
     case 'createTicket': {
       const category = payload.category === 'emergency' ? 'emergency' : 'general';
       const phone = payload.phone ? String(payload.phone).trim().slice(0, 30) : null;
@@ -554,23 +838,31 @@ async function runReactAction(action, payload) {
       break;
     }
     case 'callNext':
-      result = await callNext(counter);
+      result = await callNext(counter, cleanServicePoint(payload.servicePoint || counter));
       break;
     case 'callTicket':
       result = await callTicketById(cleanTicketId(payload.ticketId), counter);
       break;
     case 'skipTicket':
-      result = await finishTicketById(cleanTicketId(payload.ticketId), 'skipTicket');
+      result = await skipServiceStep(cleanTicketId(payload.ticketId), cleanServicePoint(payload.servicePoint || counter));
       break;
     case 'recallTicket':
-      result = await recallTicketById(cleanTicketId(payload.ticketId), counter);
+      result = await recallServiceStep(cleanTicketId(payload.ticketId), cleanServicePoint(payload.servicePoint || counter));
       break;
     case 'repeatCall':
-      result = await recallTicketById(cleanTicketId(payload.ticketId), counter);
+      result = await recallCurrent(String(cleanServicePoint(payload.servicePoint || counter)));
       break;
     case 'completeTicket':
-      result = await finishTicketById(cleanTicketId(payload.ticketId), 'completeTicket');
+      result = await completeServiceStep(cleanTicketId(payload.ticketId), cleanServicePoint(payload.servicePoint || counter));
       break;
+    case 'routeServiceTicket': {
+      const fromPoint = cleanServicePoint(payload.fromPoint || counter);
+      const destination = payload.destination === 'complete'
+        ? 'complete'
+        : cleanServicePoint(payload.destination);
+      result = await routeServiceStep(cleanTicketId(payload.ticketId), fromPoint, destination);
+      break;
+    }
     case 'cancelTicket':
       result = await cancelTicket(cleanTicketId(payload.ticketId));
       break;

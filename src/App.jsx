@@ -2,23 +2,28 @@ import React, { useCallback, useEffect, useMemo, useReducer, useState } from 're
 import { apiConfig, apiRequest, demoQueue } from './api.js';
 import generalQueueBg from './assets/queue-general-bg.png';
 import emergencyQueueBg from './assets/queue-emergency-bg.png';
-import reportClinic from './assets/report-clinic.png';
-import reportPdf from './assets/report-pdf.png';
-import reportExcel from './assets/report-excel.png';
-import reportCsv from './assets/report-csv.svg';
 import adminPerson from './assets/admin-person.svg';
 import adminAccount from './assets/admin-account.svg';
 import adminDashboard from './assets/admin-dashboard.svg';
-import adminReport from './assets/admin-report.svg';
 import queueAlarm from './assets/queue-alarm.svg';
 import { speakQueue } from './speech.js';
 import { useDashboardMetrics } from './hooks/useDashboardMetrics.js';
 import { useQueueData } from './hooks/useQueueData.js';
 import { buildDashboardFallback, buildDashboardViewModel, formatDashboardUpdatedAt } from './dashboardMetrics.js';
+import { downloadCsvReport, downloadExcelReport, printReport } from './reportExport.js';
 
 const CATEGORY = {
   general: { label: 'ผู้ป่วยทั่วไป', description: 'รับบริการตามลำดับคิวปกติ', color: 'blue', icon: '▣' },
   emergency: { label: 'อุบัติเหตุ', description: 'เจ้าหน้าที่สามารถจัดลำดับก่อนเมื่อจำเป็น', color: 'red', icon: '✚' },
+};
+
+// Demo-only staff accounts. They are intentionally separate from an admin role.
+const MOCK_STAFF_ACCOUNTS = {
+  point1: { password: 'test1234', point: 1, name: 'เจ้าหน้าที่จุดบริการ 1' },
+  point3: { password: 'test1234', point: 3, name: 'เจ้าหน้าที่จุดบริการ 3' },
+  point4: { password: 'test1234', point: 4, name: 'เจ้าหน้าที่จุดบริการ 4' },
+  point6: { password: 'test1234', point: 6, name: 'เจ้าหน้าที่จุดบริการ 6' },
+  point7: { password: 'test1234', point: 7, name: 'เจ้าหน้าที่จุดบริการ 7' },
 };
 
 function navigate(path) {
@@ -34,9 +39,17 @@ function navigate(path) {
 }
 
 function useHashRoute() {
-  const [route, setRoute] = useState(() => window.location.hash.replace(/^#/, '') || '/');
+  const readRoute = () => {
+    const currentRoute = window.location.hash.replace(/^#/, '') || '/';
+    if (currentRoute === '/report') {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#/dashboard`);
+      return '/dashboard';
+    }
+    return currentRoute;
+  };
+  const [route, setRoute] = useState(readRoute);
   useEffect(() => {
-    const update = () => setRoute(window.location.hash.replace(/^#/, '') || '/');
+    const update = () => setRoute(readRoute());
     window.addEventListener('hashchange', update);
     return () => window.removeEventListener('hashchange', update);
   }, []);
@@ -66,7 +79,7 @@ function DisplayTicket({ ticket, empty = false }) {
   const category = CATEGORY[ticket.category] || CATEGORY.general;
   return <article className={`display-ticket ${ticket.status === 'called' ? 'is-called' : ''}`}>
     <div className="display-number">{ticket.ticketCode}</div>
-    <div className="display-service"><strong>{category.label}</strong><span>ช่องบริการหมายเลข 2</span></div>
+    <div className="display-service"><strong>{category.label}</strong><span>จุดบริการ {ticket.currentPoint || 1}</span></div>
   </article>;
 }
 
@@ -81,32 +94,28 @@ function QueueDisplay({ queueData }) {
     general: { ticketCode: 'Q067', category: 'general' },
     emergency: { ticketCode: 'Q071', category: 'emergency' },
   };
-  const latestFor = category => called.find(ticket => ticket.category === category)
-    || (apiConfig.configured ? { ticketCode: '—', category } : demoCurrent[category]);
-  const general = latestFor('general');
-  const emergency = latestFor('emergency');
-  const upcoming = active
-    .filter(ticket => ticket.id !== general.id && ticket.id !== emergency.id && ticket.status !== 'skipped')
-    .sort((a, b) => (Number(a.sequenceNo) || 0) - (Number(b.sequenceNo) || 0))
-    .slice(0, 4);
+  const latestAtPoint = (servicePoint, fallbackCategory) => called.find(ticket => Number(ticket.currentPoint) === servicePoint)
+    || (apiConfig.configured ? { ticketCode: '—', category: fallbackCategory, currentPoint: servicePoint } : { ...demoCurrent[fallbackCategory], currentPoint: servicePoint });
+  const point4Current = latestAtPoint(4, 'general');
+  const point7Current = latestAtPoint(7, 'emergency');
+  const upcoming = tickets
+    .filter(ticket => ticket.status === 'waiting' && [4, 7].includes(Number(ticket.currentPoint)))
+    .sort((a, b) => new Date(a.arrivedAt || a.issuedAt).getTime() - new Date(b.arrivedAt || b.issuedAt).getTime() || (Number(a.sequenceNo) || 0) - (Number(b.sequenceNo) || 0));
   const history = (source.history || (apiConfig.configured
-    ? called.filter(ticket => ticket !== general && ticket !== emergency)
+    ? called.filter(ticket => ticket !== point4Current && ticket !== point7Current)
     : [{ id: 'demo-history-1', ticketCode: 'Q068', counter: 3 }, { id: 'demo-history-2', ticketCode: 'Q069', counter: 4 }, { id: 'demo-history-3', ticketCode: 'Q070', counter: 5 }]))
-    .filter(ticket => ticket.id !== general.id && ticket.id !== emergency.id)
-    .slice(0, 3);
+    .slice(0, 10);
   const displayTime = new Intl.DateTimeFormat('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
-  const categoryLabel = ticket => CATEGORY[ticket.category]?.label || ticket.categoryLabel || 'ผู้ป่วยทั่วไป';
   return <div className="queue-display-shell">
     <header className="queue-display-header">
       <div>
-        <h1>Call the queue number</h1>
-        <p>Medical facility Kasetsart University Kamphaeng Saen Campus Medical Clinic</p>
+        <h1>ประกาศเรียกหมายเลขคิว</h1>
+        <p>สถานพยาบาล มหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตกำแพงแสน</p>
       </div>
       {/* <div className="queue-display-header-actions">
         <nav className="queue-display-nav" aria-label="เมนูหลัก">
           <button onClick={() => navigate('/operator')}>จัดการคิว</button>
           <button onClick={() => navigate('/dashboard')}>Dashboard</button>
-          <button onClick={() => navigate('/report')}>รายงาน</button>
           <button onClick={() => navigate('/kiosk')}>รับบัตรคิว</button>
           <button onClick={() => navigate('/confirm')}>ตรวจสอบคิว</button>
         </nav>
@@ -115,27 +124,32 @@ function QueueDisplay({ queueData }) {
     </header>
     <main className="queue-display-main">
       <section className="queue-display-current-grid">
-        {[general, emergency].map(ticket => <article className="queue-display-current" key={ticket.category}>
+        {[point4Current, point7Current].map(ticket => <article className="queue-display-current" key={ticket.currentPoint}>
           <div className="queue-display-number">{ticket.ticketCode}</div>
-          <div className="queue-display-current-copy"><strong>{categoryLabel(ticket)}</strong><span>ช่องบริการหมายเลข {ticket.category === 'emergency' ? '7' : '3'}</span></div>
+          <div className="queue-display-current-copy"><strong>จุดบริการ {ticket.currentPoint}</strong><small className="queue-display-category">ประเภท: {ticket.currentPoint === 4 ? 'ผู้ป่วยทั่วไป' : 'อุบัติเหตุ'}</small><span>กำลังเรียก</span></div>
         </article>)}
       </section>
       <aside className="queue-display-history">
         <h2>คิวที่เรียกไปแล้ว</h2>
         <div className="queue-display-history-list">
-          {history.map((ticket, index) => <div className="queue-display-history-row" key={ticket.id || `${ticket.ticketCode}-${index}`}><strong>{ticket.ticketCode}</strong><span>ช่องบริการหมายเลข {ticket.counter || (index + 3)}</span></div>)}
+          {history.map((ticket, index) => <div className="queue-display-history-row" key={ticket.id || `${ticket.ticketCode}-${index}`}><strong>{ticket.ticketCode}</strong><span>จุดบริการ {ticket.currentPoint || ticket.counter || (index + 3)}</span></div>)}
           {!history.length && <div className="queue-display-history-empty">ยังไม่มีประวัติการเรียกคิว</div>}
         </div>
         <div className="queue-display-clock"><img src={queueAlarm} alt="" />{displayTime} น.</div>
       </aside>
-      <section className="queue-display-upcoming">
-        <header><h2>Upcoming Queue</h2><strong>สถานะ</strong></header>
-        <div className="queue-display-upcoming-list">
-          {upcoming.map(ticket => <div className="queue-display-upcoming-row" key={ticket.id}>
-            <strong>{ticket.ticketCode}</strong><span>ช่องบริการหมายเลข {ticket.counter || '1'}</span><em>{ticket.status === 'skipped' ? 'ข้ามคิว' : 'กำลังดำเนินการ'}</em>
-          </div>)}
-          {!upcoming.length && <div className="queue-display-history-empty">ไม่มีคิวถัดไป</div>}
-        </div>
+      <section className="queue-display-upcoming-grid">
+        {[4, 7].map(point => {
+          const pointQueue = upcoming.filter(ticket => Number(ticket.currentPoint) === point);
+          return <section className="queue-display-upcoming" key={point}>
+            <header><h2>คิวรอจุดบริการ {point} ({pointQueue.length} คิว)</h2><strong>สถานะ</strong></header>
+            <div className="queue-display-upcoming-list">
+              {pointQueue.map(ticket => <div className="queue-display-upcoming-row" key={ticket.id}>
+                <strong>{ticket.ticketCode}</strong><em>รอเรียก</em>
+              </div>)}
+              {!pointQueue.length && <div className="queue-display-history-empty">ไม่มีคิวรอเรียก</div>}
+            </div>
+          </section>;
+        })}
       </section>
     </main>
   </div>;
@@ -212,12 +226,15 @@ function Login() {
   const [error, setError] = useState('');
   function submit(event) {
     event.preventDefault();
-    if (!username.trim() || !password) {
-      setError('กรุณากรอกชื่อผู้ใช้และรหัสผ่าน');
+    const account = MOCK_STAFF_ACCOUNTS[username.trim().toLowerCase()];
+    if (!account || account.password !== password) {
+      setError('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
       return;
     }
     sessionStorage.setItem('queueflow-authenticated', 'true');
     sessionStorage.setItem('queueflow-operator-id', username.trim());
+    sessionStorage.setItem('queueflow-service-point', String(account.point));
+    sessionStorage.setItem('queueflow-staff-name', account.name);
     window.dispatchEvent(new Event('queueflow-auth-changed'));
     navigate('/operator');
   }
@@ -229,7 +246,7 @@ function Login() {
       {error && <p className="login-error" role="alert">{error}</p>}
       <button className="kiosk-confirm" type="submit">เข้าสู่ระบบ</button>
       <button className="login-back" type="button" onClick={() => navigate('/')}>กลับหน้าหลัก</button>
-    </form></main>
+    </form><section className="mock-account-list"><strong>บัญชีทดลองเจ้าหน้าที่</strong>{Object.entries(MOCK_STAFF_ACCOUNTS).map(([user, account]) => <button key={user} type="button" onClick={() => { setUsername(user); setPassword(account.password); setError(''); }}><span>{account.name}</span><small>{user} / test1234</small></button>)}</section></main>
   </div></Shell>;
 }
 
@@ -256,11 +273,10 @@ function FigmaAdminNav({ active }) {
     <span>{label}</span>
   </button>;
   return <aside className="figma-admin-nav">
-    <div className="figma-admin-brand"><strong>Admin</strong><p>Medical facility Kasetsart University Kamphaeng Saen Campus Medical Clinic</p></div>
+    <div className="figma-admin-brand"><strong>ระบบเจ้าหน้าที่</strong><p>สถานพยาบาล มหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตกำแพงแสน</p></div>
     <nav>
-      {item('queue', 'Queue', adminPerson, '/operator')}
-      {item('dashboard', 'Dashboard', adminDashboard, '/dashboard')}
-      {item('report', 'Report', adminReport, '/report')}
+      {item('queue', 'เรียกคิว', adminPerson, '/operator')}
+      {item('dashboard', 'ภาพรวม', adminDashboard, '/dashboard')}
     </nav>
   </aside>;
 }
@@ -269,79 +285,66 @@ function FigmaAdminFrame({ active, title, children, action }) {
   return <div className="figma-admin-shell">
     <FigmaAdminNav active={active} />
     <div className="figma-admin-workspace">
-      <header className="figma-admin-topbar"><strong>Admin</strong><img src={adminAccount} alt="Admin account" /></header>
+      <header className="figma-admin-topbar"><strong>เจ้าหน้าที่</strong><img src={adminAccount} alt="บัญชีเจ้าหน้าที่" /></header>
       <main className="figma-admin-main">
-        <div className="figma-admin-heading"><div><h1>{title}</h1><p>Medical facility Kasetsart University Kamphaeng Saen Campus Medical Clinic</p></div>{action}</div>
+        <div className="figma-admin-heading"><div><h1>{title}</h1><p>สถานพยาบาล มหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตกำแพงแสน</p></div>{action}</div>
         {children}
       </main>
     </div>
   </div>;
 }
 
-function FigmaQueue({ queueData, actions, loading, error }) {
+function FigmaQueue({ queueData, actions, loading, error, staffPoint, staffName }) {
   const source = queueData || demoQueue();
   const all = source.tickets || [];
-  const active = all.filter(ticket => ['waiting', 'called', 'serving', 'skipped'].includes(ticket.status));
-  const current = source.current && ['called', 'serving'].includes(source.current.status)
-    ? source.current
-    : active.find(ticket => ['called', 'serving'].includes(ticket.status)) || null;
-  const waiting = active
-    .filter(ticket => ticket.status === 'waiting')
-    .sort((a, b) => (Number(b.priority) || 0) - (Number(a.priority) || 0) || (Number(a.sequenceNo) || 0) - (Number(b.sequenceNo) || 0));
-  const skipped = active.filter(ticket => ticket.status === 'skipped');
-  const upcoming = waiting.slice(0, 4);
-  const statusLabel = ticket => {
-    if (ticket.status === 'waiting') return 'รอเรียก';
-    if (ticket.status === 'called' || ticket.status === 'serving') return 'กำลังดำเนินการ';
-    return 'ข้ามคิว';
+  const [point, setPoint] = useState(staffPoint || 1);
+  const soundStorageKey = `queueflow-sound-point-${point}`;
+  const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem(`queueflow-sound-point-${staffPoint || 1}`) !== 'false');
+  useEffect(() => {
+    setSoundEnabled(localStorage.getItem(`queueflow-sound-point-${point}`) !== 'false');
+  }, [point]);
+  const points = source.servicePoints || [{ point: 1, name: 'เวชระเบียนและวัดค่าพื้นฐาน' }, { point: 3, name: 'คัดกรอง' }, { point: 4, name: 'พบแพทย์' }, { point: 6, name: 'ส่งใบสั่งยาและรับยา' }, { point: 7, name: 'ทำแผล' }];
+  const selected = points.find(item => Number(item.point) === Number(point)) || points[0];
+  const current = all.find(ticket => ticket.status === 'called' && Number(ticket.currentPoint) === Number(point));
+  const waiting = all
+    .filter(ticket => ticket.status === 'waiting' && Number(ticket.currentPoint) === Number(point))
+    .sort((a, b) => new Date(a.arrivedAt || a.issuedAt).getTime() - new Date(b.arrivedAt || b.issuedAt).getTime() || Number(a.id) - Number(b.id));
+  const skipped = all.filter(ticket => ticket.status === 'skipped' && Number(ticket.currentPoint) === Number(point));
+  const announce = ticket => {
+    if (soundEnabled && ticket?.ticketCode) speakQueue({ ...ticket, servicePoint: point });
   };
-  async function handleCallNext() {
-    try {
-      const ticket = await actions.callNext();
-      if (ticket?.ticketCode) speakQueue(ticket);
-    } catch (error) { /* The action error is shown by the status banner. */ }
-  }
-  async function handleRecall(ticket) {
-    try {
-      const recalled = await actions.recall(ticket);
-      speakQueue(recalled?.ticketCode ? recalled : ticket);
-    } catch (error) { /* The action error is shown by the status banner. */ }
-  }
-  async function handleRepeat(ticket) {
-    try {
-      const repeated = await actions.repeat(ticket);
-      speakQueue(repeated?.ticketCode ? repeated : ticket);
-    } catch (error) { /* The action error is shown by the status banner. */ }
-  }
-  return <FigmaAdminFrame active="queue" title="Call the queue number">
+  const toggleSound = () => {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    localStorage.setItem(soundStorageKey, String(next));
+    if (!next) window.speechSynthesis?.cancel();
+  };
+  const callNext = async () => { try { const ticket = await actions.callNext(point); announce(ticket); } catch (_) {} };
+  const recallQueue = async ticket => { try { const result = await actions.recall(ticket, point); announce(result?.ticketCode ? result : ticket); } catch (_) {} };
+  const repeatQueue = async ticket => { try { const result = await actions.repeat(ticket, point); announce(result?.ticketCode ? result : ticket); } catch (_) {} };
+  return <FigmaAdminFrame active="queue" title="เรียกหมายเลขคิว">
     <StatusBanner error={error} />
     <section className="figma-queue-layout">
       <div className="figma-current-card">
         <div className="figma-current-ticket">{current?.ticketCode || '—'}</div>
-        <div className="figma-current-info"><strong>{current ? (CATEGORY[current.category]?.label || current.categoryLabel || 'ผู้ป่วยทั่วไป') : 'ยังไม่มีคิวที่กำลังเรียก'}</strong><span>{current ? 'ช่องบริการหมายเลข 2' : 'กด “เรียกคิว” เพื่อเริ่มให้บริการ'}</span></div>
+        <div className="figma-current-info"><strong>{staffName || 'เจ้าหน้าที่'}</strong><span>จุดบริการ {point} · {selected?.name}</span><button className={`sound-toggle ${soundEnabled ? 'enabled' : 'disabled'}`} type="button" aria-pressed={soundEnabled} onClick={toggleSound}>เสียงประกาศ: {soundEnabled ? 'เปิด' : 'ปิด'}</button></div>
       </div>
       <div className="figma-queue-actions">
-        <button className="queue-action next" disabled={loading || Boolean(current) || !waiting.length} onClick={handleCallNext}>เรียกคิว</button>
-        <button className="queue-action done" disabled={loading || !current} onClick={() => current && actions.complete(current)}>เสร็จสิ้น <span>✓</span></button>
-        <button className="queue-action skip" disabled={loading || !current} onClick={() => current && actions.skip(current)}>ข้ามคิว <span>↷</span></button>
-        <button className="queue-action recall" disabled={loading || (!skipped.length && !current)} onClick={() => skipped[0] ? handleRecall(skipped[0]) : current && handleRepeat(current)}>เรียกคิวซ้ำ <span>↻</span></button>
-        {current && <p className="queue-action-hint">กำลังให้บริการ {current.ticketCode}<br />กด “เรียกคิวซ้ำ” เพื่อประกาศอีกครั้ง หรือกด “เสร็จสิ้น” / “ข้ามคิว” ก่อนเรียกคิวถัดไป</p>}
-        {!current && !waiting.length && <p className="queue-action-hint">ไม่มีคิวที่รอเรียก</p>}
+        <button className="queue-action next" disabled={loading || Boolean(current) || !waiting.length} onClick={callNext}>เรียกคิว</button>
+        {current && point === 1 && <button className="queue-action done" disabled={loading} onClick={() => actions.complete(current, 1)}>ส่งต่อไปจุดบริการ 3 <span>✓</span></button>}
+        {current && point === 3 && <div className="doctor-routes"><button disabled={loading} onClick={() => actions.routeService(current, 3, 4)}>ส่งต่อไปจุดบริการ 4</button><button disabled={loading} onClick={() => actions.routeService(current, 3, 7)}>ส่งต่อไปจุดบริการ 7</button></div>}
+        {current && point === 4 && <button className="queue-action done" disabled={loading} onClick={() => actions.complete(current, 4)}>ส่งต่อไปจุดบริการ 6 <span>✓</span></button>}
+        {current && point === 7 && <div className="doctor-routes"><button disabled={loading} onClick={() => actions.routeService(current, 7, 4)}>ส่งต่อไปจุดบริการ 4</button><button disabled={loading} onClick={() => actions.routeService(current, 7, 'complete')}>เสร็จสิ้นการรับบริการ</button></div>}
+        {current && point === 6 && <button className="queue-action done" disabled={loading} onClick={() => actions.complete(current, 6)}>เสร็จสิ้นการรับบริการ <span>✓</span></button>}
+        <button className="queue-action skip" disabled={loading || !current} onClick={() => current && actions.skip(current, point)}>ข้ามคิว <span>↷</span></button>
+        <button className="queue-action recall" disabled={loading || (!skipped.length && !current)} onClick={() => skipped[0] ? recallQueue(skipped[0]) : current && repeatQueue(current)}>เรียกคิวซ้ำ <span>↻</span></button>
+        {current && <p className="queue-action-hint">กำลังให้บริการ {current.ticketCode} ที่จุดบริการ {point}</p>}
       </div>
-      <section className="figma-upcoming-card">
-        <header><strong>Upcoming Queue</strong><span>สถานะ</span><span>แก้ไข</span></header>
-        {upcoming.map(ticket => <div className="figma-upcoming-row" key={ticket.id}>
-          <strong>{ticket.ticketCode}</strong><span>ช่องบริการหมายเลข 1</span><em className={`status-${ticket.status}`}>{statusLabel(ticket)}</em><button onClick={() => actions.cancel(ticket)}>ลบคิว</button>
-        </div>)}
-        {!upcoming.length && <div className="figma-upcoming-empty">ไม่มีคิวถัดไป</div>}
+      <section className="figma-upcoming-card"><header><strong>Upcoming Queue</strong><span>สถานะ</span><span>แก้ไข</span></header>
+        {waiting.slice(0, 4).map(ticket => <div className="figma-upcoming-row" key={ticket.id}><strong>{ticket.ticketCode}</strong><span>จุดบริการ {point}</span><em className="status-waiting">รอเรียก</em><button onClick={() => actions.cancel(ticket)}>ลบคิว</button></div>)}
+        {!waiting.length && <div className="figma-upcoming-empty">ไม่มีคิวถัดไป</div>}
       </section>
-      {skipped.length > 0 && <section className="figma-skipped-card">
-        <header><strong>คิวที่ข้ามไว้</strong><span>สามารถเรียกซ้ำภายหลังได้</span></header>
-        {skipped.map(ticket => <div className="figma-skipped-row" key={ticket.id}>
-          <strong>{ticket.ticketCode}</strong><span>{CATEGORY[ticket.category]?.label || ticket.categoryLabel || 'ผู้ป่วยทั่วไป'}</span>
-          <button disabled={loading} onClick={() => handleRecall(ticket)}>เรียกคิวซ้ำ</button>
-        </div>)}
-      </section>}
+      {skipped.length > 0 && <section className="figma-skipped-card"><header><strong>คิวที่ข้ามไว้</strong><span>สามารถเรียกซ้ำภายหลังได้</span></header>{skipped.map(ticket => <div className="figma-skipped-row" key={ticket.id}><strong>{ticket.ticketCode}</strong><span>{CATEGORY[ticket.category]?.label || 'ผู้ป่วยทั่วไป'}</span><button disabled={loading} onClick={() => recallQueue(ticket)}>เรียกคิวซ้ำ</button></div>)}</section>}
     </section>
   </FigmaAdminFrame>;
 }
@@ -357,49 +360,95 @@ function FigmaDashboard({ queueData, loading, error }) {
   const dashboardError = error || metricsError;
   const dashboardLoading = loading || metricsLoading;
   const updatedAt = formatDashboardUpdatedAt(metrics?.generatedAt);
-  let dashboardNote = 'โหมดสาธิต · ยังไม่ได้เชื่อมต่อ API';
+  let dashboardNote = 'โหมดสาธิต · ยังไม่ได้เชื่อมต่อระบบข้อมูล';
   if (dashboardLoading) dashboardNote = 'กำลังโหลดข้อมูล...';
-  else if (updatedAt) dashboardNote = `อัปเดตล่าสุด ${updatedAt} · จาก PostgreSQL API`;
+  else if (updatedAt) dashboardNote = `อัปเดตล่าสุด ${updatedAt} · จากฐานข้อมูล`;
 
-  return <FigmaAdminFrame active="dashboard" title="Dashboard" action={<div className="figma-dashboard-actions"><button className="figma-refresh" disabled={dashboardLoading} onClick={refreshMetrics}>{dashboardLoading ? 'กำลังโหลด...' : 'รีเฟรช'}</button><button className="figma-export" onClick={() => navigate('/report')}>ส่งออกรายงาน <span>↥</span></button></div>}>
+  return <FigmaAdminFrame active="dashboard" title="ภาพรวมการให้บริการ" action={<div className="figma-dashboard-actions"><button className="figma-refresh" disabled={dashboardLoading} onClick={refreshMetrics}>{dashboardLoading ? 'กำลังโหลด...' : 'รีเฟรช'}</button></div>}>
     <StatusBanner error={dashboardError} />
+    <DashboardReport queueData={queueData} />
     <section className="figma-dashboard-layout">
+      <section className="figma-status-strip">
+        <div><span>คิวที่กำลังรอ</span><strong>{Number(data.waiting || 0)}</strong></div>
+        <div><span>คิวที่กำลังเรียก</span><strong>{Number(data.calling || 0)}</strong></div>
+        <div><span>เสร็จสิ้นแล้ว</span><strong>{Number(data.completed || 0)}</strong></div>
+        <div><span>คิวที่ข้ามไว้</span><strong>{Number(data.skipped || 0)}</strong></div>
+      </section>
       <div className="figma-chart-card">
-        <h2>ระยะเวลา และ ปริมาณผู้เข้าใช้บริการในแต่ละจุดบริการ</h2>
-        <div className="figma-chart-toolbar"><span>วันนี้ · {data.total ?? 0} รายการ</span><div><i className="legend-users" />ผู้รับบริการ <i className="legend-time" />ระยะเวลา (นาที)</div></div>
-        <div className="figma-bars">{bars.map(bar => <div className="figma-bar-group" key={bar.label}><div className="figma-bar-pair"><span className="bar-users" style={{ height: `${bar.usersHeight}%` }} /><span className="bar-time" style={{ height: `${bar.minutesHeight}%` }} /></div><strong>{bar.label}</strong></div>)}</div>
+        <h2>ระยะเวลาและจำนวนผู้รับบริการในแต่ละจุดบริการ</h2>
+        <div className="figma-chart-toolbar"><span>วันนี้ · {data.total ?? 0} รายการ</span><div><i className="legend-users" />จำนวนผู้รับบริการ <i className="legend-wait" />เวลารอเฉลี่ย <i className="legend-time" />เวลาให้บริการเฉลี่ย</div></div>
+        <div className="figma-bars">{bars.map(bar => <div className="figma-bar-group" key={bar.label}><div className="figma-bar-pair"><span className="bar-users" style={{ height: `${bar.usersHeight}%` }} /><span className="bar-wait" style={{ height: `${bar.waitHeight}%` }} /><span className="bar-time" style={{ height: `${bar.minutesHeight}%` }} /></div><strong>{bar.label}</strong><small>{bar.users} คิว</small><small>รอ {bar.waitMinutes} นาที · บริการ {bar.minutes} นาที</small></div>)}</div>
       </div>
-      <div className="figma-peak-card"><h2>ช่วงเวลาที่หนาแน่น</h2>{hourly.map(item => <div className="peak-row" key={item.hour}><span>{String(item.hour).padStart(2, '0')}:00</span><i style={{ opacity: 0.25 + ((Number(item.users) || 0) / peakMax) * 0.75 }} /></div>)}</div>
+      <div className="figma-peak-card"><h2>ช่วงเวลาที่หนาแน่น</h2>{hourly.map(item => <div className={`peak-row ${Number(item.users) > 0 && Number(item.users) === peakMax ? 'is-peak' : ''}`} key={item.hour}><span>{String(item.hour).padStart(2, '0')}:00</span><i style={{ opacity: 0.2 + ((Number(item.users) || 0) / peakMax) * 0.8 }} /><strong>{Number(item.users) || 0} คิว</strong></div>)}</div>
       <div className="figma-stat-card"><span>จำนวนผู้เข้าใช้บริการ</span><strong>{Number(data.total || 0).toLocaleString()}</strong></div>
       <div className="figma-stat-card"><span>ระยะเวลาการรอเฉลี่ย</span><strong>{Number(data.averageWaitMinutes || 0)}<small> นาที</small></strong></div>
-      <div className="figma-stat-card"><span>ระยะเวลาการให้บริการ</span><strong>{Number(data.averageServiceMinutes || 0)}<small> นาที</small></strong></div>
+      <div className="figma-stat-card"><span>ระยะเวลาให้บริการเฉลี่ย</span><strong>{Number(data.averageServiceMinutes || 0)}<small> นาที</small></strong></div>
     </section>
     <p className="figma-data-note">{dashboardNote}</p>
   </FigmaAdminFrame>;
 }
 
-function FigmaReport({ queueData, error }) {
-  const [reportType, setReportType] = useState('overview');
-  const [range, setRange] = useState('today');
-  const [format, setFormat] = useState('PDF');
-  function exportReport() {
-    if (format === 'CSV') {
-      const rows = [['ticketCode', 'category', 'status', 'issuedAt'], ...(queueData?.tickets || []).map(ticket => [ticket.ticketCode, ticket.category, ticket.status, ticket.issuedAt])];
-      const blob = new Blob([rows.map(row => row.map(value => `"${String(value ?? '').replaceAll('"', '""')}"`).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' });
-      const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `queueflow-${range}.csv`; link.click(); URL.revokeObjectURL(url); return;
+function DashboardReport({ queueData }) {
+  const periods = [
+    { value: 'today', label: 'วันนี้' },
+    { value: 'week', label: 'สัปดาห์นี้' },
+    { value: 'month', label: 'เดือนปัจจุบัน' },
+    { value: 'three-months', label: '3 เดือนล่าสุด' },
+    { value: 'academic-year', label: 'ปีการศึกษาปัจจุบัน' },
+    { value: 'year', label: 'ปีปัจจุบัน' },
+    { value: 'custom', label: 'กำหนดช่วงวันที่' },
+  ];
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const [range, setRange] = useState('month');
+  const [customStart, setCustomStart] = useState(today);
+  const [customEnd, setCustomEnd] = useState(today);
+  const [reportData, setReportData] = useState(null);
+  const [reportLoading, setReportLoading] = useState(true);
+  const [reportError, setReportError] = useState('');
+  const [exportError, setExportError] = useState('');
+  const [exportingFormat, setExportingFormat] = useState('');
+  const rangeLabel = Object.fromEntries(periods.map(item => [item.value, item.label]));
+  useEffect(() => {
+    if (range === 'custom' && (!customStart || !customEnd || customStart > customEnd)) {
+      setReportError('ช่วงวันที่ไม่ถูกต้อง กรุณาตรวจสอบวันเริ่มต้นและวันสิ้นสุด');
+      setReportLoading(false);
+      return undefined;
     }
-    window.alert(`เตรียมสร้างรายงาน ${format} (${reportType === 'overview' ? 'สรุปภาพรวมการใช้บริการ' : 'รายละเอียดส่วนบุคคล'})`);
+    let active = true;
+    setReportLoading(true);
+    setReportError('');
+    apiRequest('getReport', { period: range, start: customStart, end: customEnd })
+      .then(data => { if (active) setReportData(data); })
+      .catch(error => { if (active) setReportError(error.message || 'โหลดข้อมูลรายงานไม่สำเร็จ'); })
+      .finally(() => { if (active) setReportLoading(false); });
+    return () => { active = false; };
+  }, [range, customStart, customEnd]);
+  const reportTickets = reportData?.tickets || (range === 'today' ? queueData?.tickets || [] : []);
+  const displayDate = value => value ? new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(value)) : '-';
+  async function handleFormatAction(format) {
+    setExportError('');
+    const options = { tickets: reportTickets, periodLabel: rangeLabel[range], startDate: reportData?.startDate, endDate: reportData?.endDate };
+    try {
+      if (format === 'PDF') {
+        printReport({ ...options, format });
+        return;
+      }
+      setExportingFormat(format);
+      if (format === 'Excel') await downloadExcelReport(options);
+      else downloadCsvReport(options);
+    } catch (error) {
+      setExportError(error.message || `${format === 'PDF' ? 'เปิดหน้าพิมพ์' : 'ส่งออกไฟล์'} ${format} ไม่สำเร็จ`);
+    } finally {
+      setExportingFormat('');
+    }
   }
-  const reportCard = (key, title, text) => <button className={`report-type-card ${reportType === key ? 'selected' : ''}`} onClick={() => setReportType(key)}><strong>{title}</strong><span>{text}</span><b>✓</b></button>;
-  const rangeButton = (key, label) => <button className={range === key ? 'selected' : ''} onClick={() => setRange(key)}>{label}</button>;
-  const fileCard = (key, label, image) => <button className={`report-file-card ${format === key ? 'selected' : ''}`} onClick={() => setFormat(key)}><img src={image} alt="" /><strong>{label}</strong></button>;
-  return <FigmaAdminFrame active="report" title="Report"><StatusBanner error={error} /><section className="figma-report-layout">
-    <div className="figma-report-main">
-      <section className="report-section report-type"><div className="report-section-heading"><h2>ประเภทรายงาน</h2><span>เดือน มิถุนายน⌄</span></div><div className="report-type-grid">{reportCard('overview', 'สรุปภาพรวมการใช้บริการ', 'สถิติการเข้าใช้บริการ และ ระยะเวลาเฉลี่ยรายวัน')}{reportCard('personal', 'รายละเอียดส่วนบุคคล', 'ประวัติการเข้าใช้สถานพยาบาล พร้อมคำวินิจฉัยเบื้องต้น')}</div></section>
-      <section className="report-section report-options"><h2>ช่วงเวลาของข้อมูล</h2><div className="report-pills">{rangeButton('today', 'วันนี้')}{rangeButton('week', '7 วันที่ผ่านมา')}{rangeButton('month', 'รายเดือน')}</div><h2>รูปแบบไฟล์</h2><div className="report-file-grid">{fileCard('PDF', 'PDF', reportPdf)}{fileCard('Excel', 'Excel', reportExcel)}{fileCard('CSV', 'CSV', reportCsv)}</div><button className="report-download" onClick={exportReport}>ดาวน์โหลดรายงาน</button></section>
-    </div>
-    <img className="report-clinic-image" src={reportClinic} alt="Medical clinic" />
-  </section></FigmaAdminFrame>;
+  const formatButton = key => <button disabled={reportLoading || Boolean(reportError) || Boolean(exportingFormat)} onClick={() => handleFormatAction(key)}>{exportingFormat === key ? 'กำลังสร้าง...' : key}</button>;
+  return <section id="dashboard-report" className="dashboard-report-toolbar">
+    <div className="dashboard-report-toolbar-copy"><strong>รายงาน</strong><span className={reportError || exportError ? 'is-error' : ''}>{reportError || exportError || (reportLoading ? 'กำลังโหลดข้อมูล...' : `${displayDate(reportData?.startDate)} – ${displayDate(reportData?.endDate)} · ${reportTickets.length} คิว`)}</span></div>
+    <label className="dashboard-report-period"><span>ช่วงเวลา</span><select value={range} onChange={event => setRange(event.target.value)}>{periods.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+    {range === 'custom' && <div className="dashboard-report-dates"><label><span>วันที่เริ่มต้น</span><input type="date" value={customStart} max={customEnd || today} onChange={event => setCustomStart(event.target.value)} /></label><label><span>วันที่สิ้นสุด</span><input type="date" value={customEnd} min={customStart} max={today} onChange={event => setCustomEnd(event.target.value)} /></label></div>}
+    <div className="dashboard-report-formats" aria-label="พิมพ์หรือส่งออกรายงาน">{formatButton('PDF')}{formatButton('Excel')}{formatButton('CSV')}</div>
+  </section>;
 }
 
 function Operator({ queueData, actions, loading, error }) {
@@ -442,7 +491,8 @@ function App() {
   }, [queue, setQueue]);
   const createTicket = useCallback((category, phone) => mutate('createTicket', { category, phone }, prev => {
     const n = prev.tickets.length + 1;
-    const ticket = { id: `demo-${Date.now()}`, ticketCode: `Q${String(n).padStart(3, '0')}`, category, categoryLabel: CATEGORY[category].label, priority: category === 'emergency' ? 100 : 10, status: 'waiting', sequenceNo: n, issuedAt: new Date().toISOString(), phone };
+    const issuedAt = new Date().toISOString();
+    const ticket = { id: `demo-${Date.now()}`, ticketCode: `Q${String(n).padStart(3, '0')}`, category, categoryLabel: CATEGORY[category].label, priority: category === 'emergency' ? 100 : 10, status: 'waiting', sequenceNo: n, issuedAt, arrivedAt: issuedAt, currentPoint: 1, phone };
     return { queue: { ...prev, tickets: [...prev.tickets, ticket] }, ticket };
   }), [mutate]);
   const ticketAction = useCallback((action, ticket) => mutate(action, { ticketId: ticket.id }, prev => {
@@ -457,31 +507,36 @@ function App() {
     return { ticket: updatedTicket, queue: { ...prev, tickets: prev.tickets.map(item => item.id === ticket.id ? updatedTicket : item), current: nextCurrent } };
   }), [mutate]);
   const actions = useMemo(() => ({
-    callNext: () => mutate('callNext', {}, prev => {
-      const waiting = prev.tickets.filter(ticket => ticket.status === 'waiting').sort((a, b) => (Number(b.priority) || 0) - (Number(a.priority) || 0) || (Number(a.sequenceNo) || 0) - (Number(b.sequenceNo) || 0));
+    callNext: (servicePoint = 1) => mutate('callNext', { servicePoint }, prev => {
+      const waiting = prev.tickets
+        .filter(ticket => ticket.status === 'waiting' && Number(ticket.currentPoint || 1) === Number(servicePoint))
+        .sort((a, b) => new Date(a.arrivedAt || a.issuedAt).getTime() - new Date(b.arrivedAt || b.issuedAt).getTime() || (Number(a.sequenceNo) || 0) - (Number(b.sequenceNo) || 0));
       const next = waiting[0];
       if (!next) return { queue: prev };
       const updatedAt = new Date().toISOString();
       const updatedTicket = { ...next, status: 'called', calledAt: updatedAt, updatedAt };
       return { ticket: updatedTicket, queue: { ...prev, tickets: prev.tickets.map(item => item.id === next.id ? updatedTicket : item), current: updatedTicket } };
     }),
-    call: ticket => ticketAction('callTicket', ticket), skip: ticket => ticketAction('skipTicket', ticket), recall: ticket => ticketAction('recallTicket', ticket), repeat: ticket => mutate('repeatCall', { ticketId: ticket.id }, prev => {
+    call: ticket => ticketAction('callTicket', ticket), skip: (ticket, servicePoint) => mutate('skipTicket', { ticketId: ticket.id, servicePoint }), recall: (ticket, servicePoint) => mutate('recallTicket', { ticketId: ticket.id, servicePoint }), repeat: (ticket, servicePoint) => mutate('repeatCall', { ticketId: ticket.id, servicePoint }, prev => {
       const updatedAt = new Date().toISOString();
       const updatedTicket = { ...ticket, calledAt: updatedAt, updatedAt };
       return { ticket: updatedTicket, queue: { ...prev, tickets: prev.tickets.map(item => item.id === ticket.id ? updatedTicket : item), current: updatedTicket } };
-    }), complete: ticket => ticketAction('completeTicket', ticket), cancel: ticket => ticketAction('cancelTicket', ticket),
+    }), complete: (ticket, servicePoint) => mutate('completeTicket', { ticketId: ticket.id, servicePoint }),
+    routeService: (ticket, fromPoint, destination) => mutate('routeServiceTicket', { ticketId: ticket.id, fromPoint, destination }),
+    cancel: ticket => ticketAction('cancelTicket', ticket),
   }), [mutate, ticketAction]);
   const adminRoute = ['/operator', '/admin-queue', '/dashboard', '/report'].includes(route);
   const authenticated = sessionStorage.getItem('queueflow-authenticated') === 'true';
+  const staffPoint = Number(sessionStorage.getItem('queueflow-service-point')) || null;
+  const staffName = sessionStorage.getItem('queueflow-staff-name') || '';
   if (route === '/login') return <Login />;
   if (adminRoute && !authenticated) return <Login />;
   if (route === '/kiosk') return <Kiosk onCreate={createTicket} />;
   if (route === '/confirm') return <ConfirmVisit />;
   if (route === '/ticket/general') return <YourQueue ticket={{ ticketCode: 'Q001', category: 'general' }} />;
   if (route === '/ticket/emergency') return <YourQueue ticket={{ ticketCode: 'Q001', category: 'emergency' }} />;
-  if (route === '/operator' || route === '/admin-queue') return <FigmaQueue queueData={queue} actions={actions} loading={loading || actionBusy} error={error || actionError} />;
-  if (route === '/dashboard') return <FigmaDashboard queueData={queue} loading={loading || actionBusy} error={error || actionError} />;
-  if (route === '/report') return <FigmaReport queueData={queue} error={error || actionError} />;
+  if (route === '/operator' || route === '/admin-queue') return <FigmaQueue queueData={queue} actions={actions} loading={loading || actionBusy} error={error || actionError} staffPoint={staffPoint} staffName={staffName} />;
+  if (route === '/dashboard' || route === '/report') return <FigmaDashboard queueData={queue} loading={loading || actionBusy} error={error || actionError} />;
   if (route === '/display') return <QueueDisplay queueData={queue} />;
   return <HomeSelector />;
 }

@@ -24,6 +24,9 @@ $passwordPtr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePass
 try {
   # Keep the password in memory only for this process. It is never written to disk.
   $env:PGPASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPtr)
+  # The schema contains Thai service-point names. Force psql to read it as UTF-8
+  # even on Windows installations whose default console encoding is WIN1252.
+  $env:PGCLIENTENCODING = 'UTF8'
   if ([string]::IsNullOrWhiteSpace($env:PGPASSWORD)) {
     throw 'No PostgreSQL password was entered'
   }
@@ -63,6 +66,7 @@ try {
 }
 finally {
   $env:PGPASSWORD = $null
+  $env:PGCLIENTENCODING = $null
   if ($passwordPtr -ne [IntPtr]::Zero) {
     [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordPtr)
   }
