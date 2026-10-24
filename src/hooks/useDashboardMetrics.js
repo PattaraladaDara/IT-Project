@@ -24,7 +24,7 @@ export function useDashboardMetrics() {
       setError('');
       return nextMetrics;
     } catch (err) {
-      setError(err.message || 'ไม่สามารถโหลดสถิติ Dashboard ได้');
+      setError(err.message || 'ไม่สามารถโหลดสถิติภาพรวมการให้บริการได้');
       return null;
     } finally {
       setLoading(false);

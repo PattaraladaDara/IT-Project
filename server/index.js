@@ -55,7 +55,7 @@ function sendError(res, statusCode, message) {
 function cleanPrefix(value) {
   const prefix = String(value || 'A').trim().toUpperCase();
   if (!/^[A-Z0-9]{1,10}$/.test(prefix)) {
-    throw new Error('prefix must contain 1-10 letters or numbers');
+    throw new Error('อักษรนำหน้าคิวต้องเป็นตัวอักษรหรือตัวเลขจำนวน 1–10 ตัว');
   }
   return prefix;
 }
@@ -79,7 +79,7 @@ function cleanQueue(value) {
 function cleanTicketId(value) {
   const id = Number.parseInt(String(value || ''), 10);
   if (!Number.isSafeInteger(id) || id <= 0) {
-    throw new Error('ticketId is invalid');
+    throw new Error('รหัสบัตรคิวไม่ถูกต้อง');
   }
   return id;
 }
@@ -867,7 +867,7 @@ async function runReactAction(action, payload) {
       result = await cancelTicket(cleanTicketId(payload.ticketId));
       break;
     default:
-      throw new Error(`ไม่รู้จัก action: ${action}`);
+      throw new Error(`ไม่รู้จักคำสั่ง: ${action}`);
   }
   if (result.error) return result;
   const queue = await getQueueData();
@@ -900,7 +900,7 @@ async function handleApi(req, res, url) {
     });
     return res.end();
   }
-  if (req.method !== 'GET') return sendError(res, 405, 'Only GET or POST is supported for this local API');
+  if (req.method !== 'GET') return sendError(res, 405, 'ระบบไม่รองรับวิธีส่งคำขอนี้');
 
   const action = (url.searchParams.get('action') || 'health').trim();
   try {
@@ -941,7 +941,7 @@ async function handleApi(req, res, url) {
         }
         break;
       default:
-        return sendError(res, 400, `ไม่รู้จัก action: ${action}`);
+        return sendError(res, 400, `ไม่รู้จักคำสั่ง: ${action}`);
     }
     return sendJson(res, result.error ? 409 : 200, result);
   } catch (error) {
@@ -957,7 +957,7 @@ function serveStatic(res, pathname) {
     if (pathname.startsWith('/assets/')) {
       const relativeAsset = pathname.slice(1).replaceAll('/', path.sep);
       filePath = path.resolve(DIST, relativeAsset);
-      if (!filePath.startsWith(`${DIST}${path.sep}`)) return sendError(res, 400, 'invalid asset path');
+      if (!filePath.startsWith(`${DIST}${path.sep}`)) return sendError(res, 400, 'ที่อยู่ไฟล์ไม่ถูกต้อง');
     } else {
       // React Router uses hash routes, so every non-asset path serves the SPA shell.
       filePath = builtIndex;

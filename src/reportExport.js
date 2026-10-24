@@ -220,7 +220,7 @@ function createLegacyExcelReportBlob({ tickets, periodLabel, startDate, endDate 
   const lastRow = Math.max(detailStartRow, detailStartRow + rows.length - 1);
   const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="11" topLeftCell="A12" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="10" customWidth="1"/><col min="2" max="2" width="15" customWidth="1"/><col min="3" max="5" width="22" customWidth="1"/><col min="6" max="7" width="23" customWidth="1"/></cols><sheetData>
-<row r="1" ht="32">${stringCell('A1', 'รายงานสรุปการให้บริการ QueueFlow', 1)}</row>
+<row r="1" ht="32">${stringCell('A1', 'รายงานสรุปการให้บริการ ระบบรันคิว', 1)}</row>
 <row r="2" ht="25">${stringCell('A2', 'สถานพยาบาล มหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตกำแพงแสน', 2)}</row>
 <row r="4">${stringCell('A4', 'ช่วงเวลา', 3)}${stringCell('B4', periodLabel, 4)}${stringCell('D4', 'ช่วงข้อมูล', 3)}${stringCell('E4', `${formatThaiDate(startDate)} ถึง ${formatThaiDate(endDate)}`, 4)}</row>
 <row r="5">${stringCell('A5', 'วันที่จัดทำ', 3)}${stringCell('B5', formatThaiDate(generatedAt, true), 4)}</row>
@@ -241,8 +241,8 @@ ${detailRows || `<row r="12"><c r="A12" t="inlineStr" s="5"><is><t>ไม่ม�
     { name: 'xl/_rels/workbook.xml.rels', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>` },
     { name: 'xl/worksheets/sheet1.xml', data: sheet },
     { name: 'xl/styles.xml', data: formalStyles },
-    { name: 'docProps/core.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>รายงานสรุปการให้บริการ QueueFlow</dc:title><dc:creator>QueueFlow</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${generatedAt.toISOString()}</dcterms:created></cp:coreProperties>` },
-    { name: 'docProps/app.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>QueueFlow</Application></Properties>` },
+    { name: 'docProps/core.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>รายงานสรุปการให้บริการ ระบบรันคิว</dc:title><dc:creator>ระบบรันคิว</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${generatedAt.toISOString()}</dcterms:created></cp:coreProperties>` },
+    { name: 'docProps/app.xml', data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>ระบบรันคิว</Application></Properties>` },
   ];
   return new Blob([createZip(files)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }
@@ -252,7 +252,7 @@ export async function createExcelReportBlob({ tickets, periodLabel, startDate, e
   const rows = reportRows(tickets);
   const summary = reportSummary(tickets);
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'QueueFlow';
+  workbook.creator = 'ระบบรันคิว';
   workbook.created = new Date();
   workbook.modified = new Date();
   workbook.subject = 'รายงานสรุปการให้บริการ';
@@ -278,7 +278,7 @@ export async function createExcelReportBlob({ tickets, periodLabel, startDate, e
     { key: 'completedAt', width: 24 },
   ];
   worksheet.mergeCells('A1:G1');
-  worksheet.getCell('A1').value = 'รายงานสรุปการให้บริการ QueueFlow';
+  worksheet.getCell('A1').value = 'รายงานสรุปการให้บริการ ระบบรันคิว';
   worksheet.getCell('A1').font = { name: 'TH Sarabun New', size: 22, bold: true, color: { argb: 'FF293681' } };
   worksheet.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
   worksheet.getRow(1).height = 34;
@@ -349,7 +349,7 @@ export async function createExcelReportBlob({ tickets, periodLabel, startDate, e
   worksheet.autoFilter = `A11:G${lastRow}`;
   worksheet.pageSetup.printArea = `A1:G${lastRow}`;
   worksheet.pageSetup.printTitlesRow = '11:11';
-  worksheet.headerFooter.oddFooter = '&LQueueFlow&Cหน้า &P จาก &N&R&D &T';
+  worksheet.headerFooter.oddFooter = '&Lระบบรันคิว&Cหน้า &P จาก &N&R&D &T';
   const buffer = await workbook.xlsx.writeBuffer();
   return new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }
@@ -357,7 +357,7 @@ export async function createExcelReportBlob({ tickets, periodLabel, startDate, e
 function canvasToJpeg(canvas) {
   return new Promise((resolve, reject) => {
     canvas.toBlob(async blob => {
-      if (!blob) return reject(new Error('ไม่สามารถสร้างหน้ารายงาน PDF ได้'));
+      if (!blob) return reject(new Error('ไม่สามารถสร้างหน้ารายงานเอกสาร ได้'));
       resolve(new Uint8Array(await blob.arrayBuffer()));
     }, 'image/jpeg', 0.9);
   });
@@ -456,7 +456,7 @@ function drawReportPage({ rows, pageNumber, pageCount, periodLabel, startDate, e
     context.fillStyle = '#111111';
     context.font = `24px ${regular}`;
     context.textAlign = 'left';
-    context.fillText('หมายเหตุ: รายงานนี้จัดทำจากข้อมูลการให้บริการที่บันทึกในระบบ QueueFlow', 65, 1485);
+    context.fillText('หมายเหตุ: รายงานนี้จัดทำจากข้อมูลการให้บริการที่บันทึกในระบบ ระบบรันคิว', 65, 1485);
     context.textAlign = 'center';
     context.fillText('ลงชื่อ ........................................................ ผู้จัดทำ', 335, 1575);
     context.fillText('ลงชื่อ ........................................................ ผู้ตรวจสอบ', 890, 1575);
@@ -469,7 +469,7 @@ function drawReportPage({ rows, pageNumber, pageCount, periodLabel, startDate, e
   context.fillStyle = '#333333';
   context.font = `22px ${regular}`;
   context.textAlign = 'left';
-  context.fillText('QueueFlow', 55, 1710);
+  context.fillText('ระบบรันคิว', 55, 1710);
   context.textAlign = 'right';
   context.fillText(`หน้า ${pageNumber} จาก ${pageCount}`, 1185, 1710);
   return canvas;
@@ -526,12 +526,12 @@ export async function createPdfReportBlob({ tickets, periodLabel, startDate, end
 
 export async function downloadExcelReport(options) {
   const blob = await createExcelReportBlob(options);
-  downloadBlob(blob, `QueueFlow-${fileSafe(options.periodLabel)}.xlsx`);
+  downloadBlob(blob, `ระบบรันคิว-${fileSafe(options.periodLabel)}.xlsx`);
 }
 
 export async function downloadPdfReport(options) {
   const blob = await createPdfReportBlob(options);
-  downloadBlob(blob, `QueueFlow-${fileSafe(options.periodLabel)}.pdf`);
+  downloadBlob(blob, `ระบบรันคิว-${fileSafe(options.periodLabel)}.pdf`);
 }
 
 export function downloadCsvReport({ tickets, periodLabel, startDate, endDate }) {
@@ -551,7 +551,7 @@ export function downloadCsvReport({ tickets, periodLabel, startDate, endDate }) 
     return [valueAsText(formatThaiDate(date)), valueAsText(time)];
   };
   const values = [
-    ['รายงานสรุปการให้บริการ QueueFlow'],
+    ['รายงานสรุปการให้บริการ ระบบรันคิว'],
     ['สถานพยาบาล', 'มหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตกำแพงแสน'],
     ['ช่วงเวลา', periodLabel || '-'],
     ['ข้อมูลระหว่าง', `${formatThaiDate(startDate)} ถึง ${formatThaiDate(endDate)}`],
@@ -568,7 +568,7 @@ export function downloadCsvReport({ tickets, periodLabel, startDate, endDate }) 
     }),
   ];
   const csv = values.map(row => row.map(value => `"${String(value ?? '').replaceAll('"', '""')}"`).join(',')).join('\r\n');
-  downloadBlob(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }), `QueueFlow-${fileSafe(periodLabel)}.csv`);
+  downloadBlob(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }), `ระบบรันคิว-${fileSafe(periodLabel)}.csv`);
 }
 
 export function printReport({ tickets, periodLabel, startDate, endDate, format = 'PDF' }) {
@@ -605,10 +605,10 @@ export function printReport({ tickets, periodLabel, startDate, endDate, format =
     }
   }, { once: true });
   printDocument.open();
-  printDocument.write(`<!doctype html><html lang="th"><head><meta charset="utf-8"><title>รายงานสรุปการให้บริการ QueueFlow</title><style>
+  printDocument.write(`<!doctype html><html lang="th"><head><meta charset="utf-8"><title>รายงานสรุปการให้บริการ ระบบรันคิว</title><style>
     @font-face{font-family:'TH Sarabun New';src:url('${escapeHtml(regularFontUrl)}') format('truetype');font-weight:400}
     @font-face{font-family:'TH Sarabun New';src:url('${escapeHtml(boldFontUrl)}') format('truetype');font-weight:700}
     @page{size:A4 landscape;margin:12mm 10mm}*{box-sizing:border-box}body{margin:0;color:#111;font-family:'TH Sarabun New',sans-serif;font-size:18pt;line-height:1.2}h1,h2,p{margin:0}header{text-align:center;border-bottom:1.5px solid #111;padding-bottom:7mm;margin-bottom:5mm}h1{font-size:27pt}h2{font-size:20pt}.meta{display:grid;grid-template-columns:1fr 1fr;gap:1mm 8mm;margin-bottom:4mm}.summary{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid #555;margin-bottom:5mm}.summary div{padding:3mm;text-align:center;border-right:1px solid #555}.summary div:last-child{border-right:0}.summary strong{font-weight:700}table{width:100%;border-collapse:collapse;font-size:15pt}thead{display:table-header-group}th,td{border:1px solid #666;padding:2mm 2.5mm;vertical-align:middle}th{background:#e8e8e8;font-weight:700;text-align:center}tbody tr:nth-child(even){background:#f8f8f8}.center{text-align:center}.empty{text-align:center;padding:10mm}.note{margin-top:6mm;font-size:16pt}.signatures{display:grid;grid-template-columns:1fr 1fr;gap:25mm;margin-top:12mm;text-align:center;break-inside:avoid}.signature div{margin-top:5mm}
-  </style></head><body><header><h1>รายงานสรุปการให้บริการ</h1><h2>สถานพยาบาล มหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตกำแพงแสน</h2></header><section class="meta"><p><strong>ช่วงเวลา:</strong> ${escapeHtml(periodLabel || '-')}</p><p><strong>ข้อมูลระหว่าง:</strong> ${escapeHtml(formatThaiDate(startDate))} ถึง ${escapeHtml(formatThaiDate(endDate))}</p><p><strong>วันที่จัดทำ:</strong> ${escapeHtml(formatThaiDate(new Date(), true))} น.</p><p><strong>รูปแบบรายงาน:</strong> ${escapeHtml(format)}</p><p><strong>จำนวนรายการ:</strong> ${summary.total} คิว</p></section><section class="summary"><div>คิวทั้งหมด <strong>${summary.total}</strong> คิว</div><div>ผู้ป่วยทั่วไป <strong>${summary.general}</strong> คิว</div><div>อุบัติเหตุ <strong>${summary.emergency}</strong> คิว</div><div>เสร็จสิ้น <strong>${summary.completed}</strong> คิว</div></section><table><thead><tr><th>ลำดับ</th><th>หมายเลขคิว</th><th>ประเภท</th><th>สถานะ</th><th>จุดบริการปัจจุบัน</th><th>เวลาออกบัตร</th><th>เวลาเสร็จสิ้น</th></tr></thead><tbody>${detailRows}</tbody></table><p class="note">หมายเหตุ: รายงานนี้จัดทำจากข้อมูลการให้บริการที่บันทึกในระบบ QueueFlow</p><section class="signatures"><div class="signature"><div>ลงชื่อ ........................................................ ผู้จัดทำ</div><div>(........................................................)</div><div>วันที่ ........../........../..........</div></div><div class="signature"><div>ลงชื่อ ........................................................ ผู้ตรวจสอบ</div><div>(........................................................)</div><div>วันที่ ........../........../..........</div></div></section></body></html>`);
+  </style></head><body><header><h1>รายงานสรุปการให้บริการ</h1><h2>สถานพยาบาล มหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตกำแพงแสน</h2></header><section class="meta"><p><strong>ช่วงเวลา:</strong> ${escapeHtml(periodLabel || '-')}</p><p><strong>ข้อมูลระหว่าง:</strong> ${escapeHtml(formatThaiDate(startDate))} ถึง ${escapeHtml(formatThaiDate(endDate))}</p><p><strong>วันที่จัดทำ:</strong> ${escapeHtml(formatThaiDate(new Date(), true))} น.</p><p><strong>รูปแบบรายงาน:</strong> ${escapeHtml(({ PDF: 'เอกสารสำหรับพิมพ์', Excel: 'ตารางคำนวณ', CSV: 'ข้อมูลแบบคั่นด้วยจุลภาค' })[format] || 'รายงาน')}</p><p><strong>จำนวนรายการ:</strong> ${summary.total} คิว</p></section><section class="summary"><div>คิวทั้งหมด <strong>${summary.total}</strong> คิว</div><div>ผู้ป่วยทั่วไป <strong>${summary.general}</strong> คิว</div><div>อุบัติเหตุ <strong>${summary.emergency}</strong> คิว</div><div>เสร็จสิ้น <strong>${summary.completed}</strong> คิว</div></section><table><thead><tr><th>ลำดับ</th><th>หมายเลขคิว</th><th>ประเภท</th><th>สถานะ</th><th>จุดบริการปัจจุบัน</th><th>เวลาออกบัตร</th><th>เวลาเสร็จสิ้น</th></tr></thead><tbody>${detailRows}</tbody></table><p class="note">หมายเหตุ: รายงานนี้จัดทำจากข้อมูลการให้บริการที่บันทึกในระบบ ระบบรันคิว</p><section class="signatures"><div class="signature"><div>ลงชื่อ ........................................................ ผู้จัดทำ</div><div>(........................................................)</div><div>วันที่ ........../........../..........</div></div><div class="signature"><div>ลงชื่อ ........................................................ ผู้ตรวจสอบ</div><div>(........................................................)</div><div>วันที่ ........../........../..........</div></div></section></body></html>`);
   printDocument.close();
 }
