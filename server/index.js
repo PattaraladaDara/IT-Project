@@ -425,9 +425,12 @@ async function completeServiceStep(ticketId, point) {
 }
 
 async function routeServiceStep(ticketId, fromPoint, destination) {
-  const allowed = fromPoint === 3
-    ? [4, 7]
-    : fromPoint === 7 ? [4, 'complete'] : [];
+  let allowed = [];
+  if (fromPoint === 3) {
+    allowed = [4, 7];
+  } else if (fromPoint === 7) {
+    allowed = [4, 'complete'];
+  }
   if (!allowed.includes(destination)) throw new Error('เส้นทางส่งต่อไม่ถูกต้อง');
   return inTransaction(async (client) => {
     const step = await client.query(
@@ -999,12 +1002,6 @@ const server = http.createServer((req, res) => {
   return serveStatic(res, url.pathname);
 });
 
-server.listen(PORT, HOST, () => {
-  console.log(`QueueFlow local server: http://${HOST}:${PORT}`);
-  console.log(`Database target: ${process.env.PGHOST || 'localhost'}:${process.env.PGPORT || 5432}/${process.env.PGDATABASE || 'queueflow_dev'}`);
-  console.log('Pages: / (home), /#/kiosk, /#/display, /#/login');
-});
-
 async function shutdown(signal) {
   console.log(`\nReceived ${signal}; shutting down...`);
   server.close(async () => {
@@ -1013,5 +1010,36 @@ async function shutdown(signal) {
   });
 }
 
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+if (require.main === module) {
+  server.listen(PORT, HOST, () => {
+    console.log(`QueueFlow local server: http://${HOST}:${PORT}`);
+    console.log(`Database target: ${process.env.PGHOST || 'localhost'}:${process.env.PGPORT || 5432}/${process.env.PGDATABASE || 'queueflow_dev'}`);
+    console.log('Pages: / (home), /#/kiosk, /#/display, /#/login');
+  });
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+}
+
+module.exports = {
+  __pool: pool,
+  categoryLabel,
+  cleanCounter,
+  cleanPrefix,
+  cleanQueue,
+  cleanServicePoint,
+  cleanTicketId,
+  getDashboard,
+  getHealth,
+  getQueueData,
+  getQueueList,
+  getReport,
+  getStatus,
+  handleApi,
+  handlePostApi,
+  mapTicketRow,
+  readBody,
+  runReactAction,
+  sendError,
+  sendJson,
+  serveStatic,
+};

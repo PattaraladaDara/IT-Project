@@ -10,6 +10,14 @@ const base =
 export default defineConfig({
   plugins: [react()],
   base,
+  test: {
+    environment: 'jsdom',
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov'],
+      reportsDirectory: 'coverage',
+    },
+  },
   server: {
     port: 5173,
     proxy: {

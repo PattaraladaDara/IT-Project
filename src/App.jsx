@@ -26,6 +26,9 @@ const MOCK_STAFF_ACCOUNTS = {
   point7: { password: 'test1234', point: 7, name: 'เจ้าหน้าที่จุดบริการ 7' },
 };
 
+const KU_ALLLOGIN_MOCK_PATH = '/auth/ku-alllogin';
+const KU_ALLLOGIN_URL = String(import.meta.env.VITE_KU_ALLLOGIN_URL || '').trim();
+
 function navigate(path) {
   const nextHash = `#${path}`;
   if (window.location.hash === nextHash) {
@@ -36,6 +39,14 @@ function navigate(path) {
     return;
   }
   window.location.hash = path;
+}
+
+function openKuAllLogin() {
+  if (KU_ALLLOGIN_URL) {
+    window.location.assign(KU_ALLLOGIN_URL);
+    return;
+  }
+  navigate(KU_ALLLOGIN_MOCK_PATH);
 }
 
 function useHashRoute() {
@@ -66,10 +77,6 @@ function Shell({ children, title = '', role = '', simple = false }) {
     {children}
     {!simple && <footer className="footer"><strong>ระบบรันคิว</strong><span>© 2024 ระบบจัดการคิว สงวนลิขสิทธิ์</span><nav><button onClick={() => navigate('/kiosk')}>บริการ</button><button onClick={() => navigate('/confirm')}>บัตรคิวของฉัน</button><button>ประวัติ</button></nav></footer>}
   </div>;
-}
-
-function PlainDisplayShell({ children }) {
-  return <div className="app-shell plain-shell">{children}<footer className="footer"><strong>ระบบรันคิว</strong><span>© 2024 ระบบจัดการคิว สงวนลิขสิทธิ์</span><nav><button onClick={() => navigate('/kiosk')}>นโยบายความเป็นส่วนตัว</button><button onClick={() => navigate('/operator')}>เงื่อนไขการใช้บริการ</button><button>ติดต่อเจ้าหน้าที่</button><button>เกี่ยวกับเรา</button></nav></footer></div>;
 }
 
 function StatusBanner({ error }) { return error ? <div className="status-banner">{error}</div> : null; }
@@ -206,10 +213,20 @@ function HomeSelector() {
     <header className="kiosk-topbar"><span>สถานพยาบาล มหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตกำแพงแสน</span><strong>ระบบรันคิว</strong></header>
     <main className="kiosk-content entry-content"><h1>ระบบรันคิว</h1><p className="home-intro">สะดวก รวดเร็ว ติดตามคิวได้ในที่เดียว</p><section className="kiosk-panel entry-panel">
       <div className="kiosk-panel-head"><strong>เลือกเมนูการใช้งาน</strong><span>เลือกบริการด้านล่างเพื่อเริ่มต้นใช้งาน</span></div>
-      <div className="kiosk-options entry-options">{choices.map(choice => <button key={choice.path} className="kiosk-option entry-option" onClick={() => navigate(choice.path)}><span className="kiosk-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{choice.path === '/kiosk' ? <><rect x="5" y="3" width="14" height="18" rx="3" /><path d="M9 8h6M9 12h6M9 16h3" /></> : choice.path === '/display' ? <><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8M12 17v4M7 9h4M7 12h8" /></> : <><circle cx="12" cy="8" r="4" /><path d="M5 21v-2a7 7 0 0 1 14 0v2" /></>}</svg></span><strong>{choice.title}</strong><small>{choice.description}</small><span className="home-card-action">{choice.path === '/login' ? 'สำหรับเจ้าหน้าที่' : 'เริ่มใช้งาน'}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6" /></svg></span></button>)}</div>
+      <div className="kiosk-options entry-options">{choices.map(choice => <button key={choice.path} className="kiosk-option entry-option" onClick={() => navigate(choice.path)}><span className="kiosk-icon" aria-hidden="true"><EntryIcon path={choice.path} /></span><strong>{choice.title}</strong><small>{choice.description}</small><span className="home-card-action">{choice.path === '/login' ? 'สำหรับเจ้าหน้าที่' : 'เริ่มใช้งาน'}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6" /></svg></span></button>)}</div>
       <p className="kiosk-note">กรุณาเลือกเมนูที่ต้องการเพื่อเริ่มใช้งาน ระบบรันคิว</p>
     </section></main>
   </div></Shell>;
+}
+
+function EntryIcon({ path }) {
+  if (path === '/kiosk') {
+    return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="3" width="14" height="18" rx="3" /><path d="M9 8h6M9 12h6M9 16h3" /></svg>;
+  }
+  if (path === '/display') {
+    return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8M12 17v4M7 9h4M7 12h8" /></svg>;
+  }
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4" /><path d="M5 21v-2a7 7 0 0 1 14 0v2" /></svg>;
 }
 
 function Login() {
@@ -237,8 +254,38 @@ function Login() {
       <label>รหัสผ่าน<input type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete="current-password" placeholder="กรอกรหัสผ่าน" /></label>
       {error && <p className="login-error" role="alert">{error}</p>}
       <button className="kiosk-confirm" type="submit">เข้าสู่ระบบ</button>
+      <div className="login-separator"><span>หรือ</span></div>
+      <button className="ku-alllogin-button" type="button" onClick={openKuAllLogin}>
+        <span className="ku-alllogin-mark" aria-hidden="true">KU</span>
+        <span><strong>เข้าสู่ระบบด้วย KU All-Login</strong><small>โหมดจำลองสำหรับการนำเสนอ</small></span>
+      </button>
       <button className="login-back" type="button" onClick={() => navigate('/')}>กลับหน้าหลัก</button>
     </form><section className="mock-account-list"><strong>บัญชีทดลองเจ้าหน้าที่</strong><p className="mock-account-hint">เลือกบัญชีเพื่อกรอกชื่อผู้ใช้และรหัสผ่านอัตโนมัติ</p>{Object.entries(MOCK_STAFF_ACCOUNTS).map(([user, account]) => <button key={user} type="button" onClick={() => { setUsername(user); setPassword(account.password); setError(''); }}><span>{account.name}</span><small>{user} / test1234</small></button>)}</section></div></main>
+  </div></Shell>;
+}
+
+function KuAllLoginMock() {
+  return <Shell simple><div className="entry-screen login-screen ku-alllogin-screen">
+    <header className="kiosk-topbar"><span>สถานพยาบาล มหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตกำแพงแสน</span><strong>ระบบรันคิว</strong></header>
+    <main className="kiosk-content">
+      <section className="ku-alllogin-mock" aria-labelledby="ku-alllogin-title">
+        <div className="ku-alllogin-brand"><span className="ku-alllogin-mark" aria-hidden="true">KU</span><span className="mock-badge">ระบบจำลอง</span></div>
+        <h1 id="ku-alllogin-title">KU All-Login</h1>
+        <p className="ku-alllogin-lead">ช่องทางเข้าสู่ระบบด้วยบัญชีมหาวิทยาลัยเกษตรศาสตร์</p>
+        <output className="ku-alllogin-notice">
+          <strong>ยังไม่ได้เชื่อมต่อระบบจริง</strong>
+          <span>หน้านี้จัดทำเพื่อแสดงรูปแบบการเข้าสู่ระบบในอนาคตเท่านั้น และจะไม่ส่งข้อมูลหรือสร้างสิทธิ์เข้าใช้งาน</span>
+        </output>
+        <div className="ku-alllogin-flow" aria-label="ขั้นตอนการเชื่อมต่อในอนาคต">
+          <div><b>1</b><span>ส่งผู้ใช้ไปยัง KU All-Login</span></div>
+          <div><b>2</b><span>ยืนยันตัวตนด้วยบัญชีมหาวิทยาลัย</span></div>
+          <div><b>3</b><span>กลับเข้าสู่ระบบรันคิวตามสิทธิ์</span></div>
+        </div>
+        <code className="ku-alllogin-path">เส้นทางที่เตรียมไว้: #{KU_ALLLOGIN_MOCK_PATH}</code>
+        <button className="ku-alllogin-disabled" type="button" disabled>เชื่อมต่อ KU All-Login เมื่อพร้อมใช้งานจริง</button>
+        <button className="login-back" type="button" onClick={() => navigate('/login')}>กลับไปเข้าสู่ระบบแบบเดิม</button>
+      </section>
+    </main>
   </div></Shell>;
 }
 
@@ -252,11 +299,6 @@ function YourQueue({ ticket }) {
 
 function ConfirmVisit() {
   return <Shell title="บัตรคิวของฉัน" role="ผู้รับบริการ"><main className="confirm-page"><div className="confirm-heading"><h1>ยืนยันการเข้ารับบริการ</h1><p>ตรวจสอบบริการที่เลือกและยืนยันการรับคิว</p></div><section className="confirm-card"><div className="confirm-category"><span>ประเภทบริการ</span><h2>การให้คำปรึกษาทางการเงิน</h2><b>⌂</b></div><div className="confirm-stats"><div><span>◷<small>เวลารอโดยประมาณ</small></span><strong>ประมาณ 18 นาที</strong></div><div><span>♟<small>จำนวนผู้รอก่อนหน้า</small></span><strong>4</strong></div></div><div className="confirm-body"><label>รับข้อความแจ้งเตือนทางโทรศัพท์ (ไม่บังคับ)<input placeholder="กรอกหมายเลขโทรศัพท์" /></label><p>เราจะส่งข้อความแจ้งเตือนเมื่อใกล้ถึงคิวของคุณ</p><button className="confirm-primary" onClick={() => navigate('/kiosk')}>ยืนยันและรับคิว</button><button className="confirm-secondary" onClick={() => navigate('/kiosk')}>เลือกบริการอื่น</button></div></section><p className="policy">เมื่อรับคิว ถือว่าคุณยอมรับ<u>เงื่อนไขการใช้บริการ</u>และ<u>นโยบายความเป็นส่วนตัว</u> อาจมีค่าบริการรับส่งข้อความตามเงื่อนไขของผู้ให้บริการ</p></main></Shell>;
-}
-
-function AdminQueueCard({ ticket, actions }) {
-  const category = CATEGORY[ticket.category] || CATEGORY.general;
-  return <article className="admin-queue-card"><span className="admin-category">{category.label}</span><div className="admin-ticket-number">{ticket.ticketCode}</div><div className="admin-card-actions"><button className="admin-call" onClick={() => actions.call(ticket)}>เรียกคิว</button><button className="admin-cancel" onClick={() => actions.cancel(ticket)}>ยกเลิก</button></div></article>;
 }
 
 function FigmaAdminNav({ active }) {
@@ -297,7 +339,7 @@ function FigmaAdminFrame({ active, title, children, action }) {
 function FigmaQueue({ queueData, actions, loading, error, staffPoint, staffName }) {
   const source = queueData || demoQueue();
   const all = source.tickets || [];
-  const [point, setPoint] = useState(staffPoint || 1);
+  const point = staffPoint || 1;
   const soundStorageKey = `queueflow-sound-point-${point}`;
   const [soundEnabled, setSoundEnabled] = useState(() => localStorage.getItem(`queueflow-sound-point-${staffPoint || 1}`) !== 'false');
   useEffect(() => {
@@ -319,9 +361,30 @@ function FigmaQueue({ queueData, actions, loading, error, staffPoint, staffName 
     localStorage.setItem(soundStorageKey, String(next));
     if (!next) window.speechSynthesis?.cancel();
   };
-  const callNext = async () => { try { const ticket = await actions.callNext(point); announce(ticket); } catch (_) {} };
-  const recallQueue = async ticket => { try { const result = await actions.recall(ticket, point); announce(result?.ticketCode ? result : ticket); } catch (_) {} };
-  const repeatQueue = async ticket => { try { const result = await actions.repeat(ticket, point); announce(result?.ticketCode ? result : ticket); } catch (_) {} };
+  const callNext = async () => {
+    try {
+      const ticket = await actions.callNext(point);
+      announce(ticket);
+    } catch (requestError) {
+      console.error('Call next queue failed', requestError);
+    }
+  };
+  const recallQueue = async ticket => {
+    try {
+      const result = await actions.recall(ticket, point);
+      announce(result?.ticketCode ? result : ticket);
+    } catch (requestError) {
+      console.error('Recall queue failed', requestError);
+    }
+  };
+  const repeatQueue = async ticket => {
+    try {
+      const result = await actions.repeat(ticket, point);
+      announce(result?.ticketCode ? result : ticket);
+    } catch (requestError) {
+      console.error('Repeat queue announcement failed', requestError);
+    }
+  };
   return <FigmaAdminFrame active="queue" title="เรียกหมายเลขคิว">
     <StatusBanner error={error} />
     <section className="figma-queue-layout">
@@ -452,13 +515,6 @@ function DashboardReport({ queueData }) {
   </section>;
 }
 
-function Operator({ queueData, actions, loading, error }) {
-  const all = queueData?.tickets || [];
-  const active = all.filter(t => ['waiting', 'called', 'serving'].includes(t.status));
-  const skipped = all.filter(t => t.status === 'skipped');
-  return <PlainDisplayShell><section className="hero admin-hero"><div className="hero-inner"><h1>ระบบจัดลำดับการใช้บริการสถานพยาบาล</h1><p>มหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตกำแพงแสน</p></div></section><main className="admin-page"><StatusBanner error={error} /><div className="admin-toolbar"><span>คิววันนี้ · {active.length + skipped.length} รายการ</span><button className="button primary" disabled={loading} onClick={actions.callNext}>เรียกคิวถัดไป</button></div><div className="admin-grid">{active.map(ticket => <AdminQueueCard key={ticket.id} ticket={ticket} actions={actions} />)}</div>{skipped.length > 0 && <section className="skipped-panel"><h2>คิวที่ถูกข้าม · เรียกซ้ำภายหลัง</h2><div className="skipped-list">{skipped.map(ticket => <div key={ticket.id}><strong>{ticket.ticketCode}</strong><span>{CATEGORY[ticket.category]?.label}</span><button className="button secondary small" onClick={() => actions.recall(ticket)}>เรียกซ้ำ</button></div>)}</div></section>}</main></PlainDisplayShell>;
-}
-
 function App() {
   const route = useHashRoute();
   const [, refreshAuth] = useReducer(version => version + 1, 0);
@@ -531,6 +587,7 @@ function App() {
   const staffPoint = Number(sessionStorage.getItem('queueflow-service-point')) || null;
   const staffName = sessionStorage.getItem('queueflow-staff-name') || '';
   if (route === '/login') return <Login />;
+  if (route === KU_ALLLOGIN_MOCK_PATH) return <KuAllLoginMock />;
   if (adminRoute && !authenticated) return <Login />;
   if (route === '/kiosk') return <Kiosk onCreate={createTicket} />;
   if (route === '/confirm') return <ConfirmVisit />;
