@@ -1,0 +1,10 @@
+# Use this override when the VPS already has a host-level Caddy service.
+# QueueFlow is exposed only on localhost; the existing Caddy proxies the domain.
+services:
+  app:
+    ports:
+      - "127.0.0.1:${APP_PORT:-3001}:3000"
+
+  caddy:
+    profiles:
+      - standalone

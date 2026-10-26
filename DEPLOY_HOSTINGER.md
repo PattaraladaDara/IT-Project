@@ -3,6 +3,35 @@
 คู่มือนี้ใช้ Docker Compose เพื่อรันหน้าเว็บ/API, PostgreSQL และ Caddy HTTPS
 บน VPS เครื่องเดียวกัน โดย PostgreSQL ไม่ถูกเปิดออกสู่อินเทอร์เน็ต
 
+## กรณี VPS มี KU-MED และ Caddy อยู่แล้ว
+
+สำหรับเครื่องที่มี KU-MED ใช้ port 3000 และ Caddy ใช้ ports 80/443 ให้ใช้
+docker-compose.hostinger.yml เพิ่มเติม ระบบจะเปิด QueueFlow เฉพาะที่
+127.0.0.1:3001 และไม่เริ่ม Caddy container ตัวที่สอง
+
+คำสั่งเปิดระบบ:
+
+~~~bash
+docker compose --env-file .env.production \
+  -f docker-compose.yml -f docker-compose.hostinger.yml \
+  up -d --build
+~~~
+
+เพิ่ม site block นี้ต่อท้าย /etc/caddy/Caddyfile:
+
+~~~caddy
+queue.ku-med-test.tech {
+    reverse_proxy 127.0.0.1:3001
+}
+~~~
+
+ตรวจและ reload Caddy:
+
+~~~bash
+caddy validate --config /etc/caddy/Caddyfile
+systemctl reload caddy
+~~~
+
 ## 1. เตรียม Hostinger VPS
 
 1. ใน hPanel ไปที่ VPS → Manage
