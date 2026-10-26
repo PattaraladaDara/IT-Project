@@ -1,0 +1,101 @@
+name: queueflow
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env.production}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env.production}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
+      TZ: Asia/Bangkok
+    volumes:
+      - queueflow_postgres:/var/lib/postgresql/data
+      - ./db/queueflow_schema.sql:/docker-entrypoint-initdb.d/001-queueflow-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+
+  app:
+    build:
+      context: .
+      args:
+        VITE_API_URL: /api
+        VITE_KU_ALLLOGIN_URL: ${VITE_KU_ALLLOGIN_URL:-}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      PGHOST: db
+      PGPORT: 5432
+      PGUSER: ${POSTGRES_USER:?Set POSTGRES_USER in .env.production}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
+      PGDATABASE: ${POSTGRES_DB:?Set POSTGRES_DB in .env.production}
+    depends_on:
+      db:
+        condition: service_healthy
+    expose:
+      - "3000"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/api?action=health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - frontend
+      - backend
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env.production}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - queueflow_caddy_data:/data
+      - queueflow_caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - frontend
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+
+volumes:
+  queueflow_postgres:
+  queueflow_caddy_data:
+  queueflow_caddy_config:
+
+networks:
+  frontend:
+  backend:
+    internal: true

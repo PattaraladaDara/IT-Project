@@ -1,0 +1,12 @@
+.git
+.github
+.scannerwork
+coverage
+dist
+node_modules
+tests
+*.log
+.env
+.env.*
+!.env.example
+!.env.production.example
