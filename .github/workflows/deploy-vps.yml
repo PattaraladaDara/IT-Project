@@ -1,0 +1,98 @@
+name: Deploy QueueFlow to Hostinger VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: queueflow-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Prepare SSH connection
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/queueflow_deploy"
+          chmod 600 "$HOME/.ssh/queueflow_deploy"
+          ssh-keyscan -p "$VPS_PORT" -H "$VPS_HOST" >> "$HOME/.ssh/known_hosts"
+
+      - name: Deploy QueueFlow
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh \
+            -i "$HOME/.ssh/queueflow_deploy" \
+            -p "$VPS_PORT" \
+            "$VPS_USER@$VPS_HOST" \
+            'bash -se' <<'REMOTE_SCRIPT'
+          set -Eeuo pipefail
+
+          cd /opt/queueflow
+
+          COMPOSE=(
+            docker compose
+            --env-file .env.production
+            -f docker-compose.yml
+            -f docker-compose.hostinger.yml
+          )
+
+          echo "Creating database backup..."
+          mkdir -p /opt/queueflow-backups
+          BACKUP_FILE="/opt/queueflow-backups/queueflow-$(date +%F-%H%M%S).sql.gz"
+
+          "${COMPOSE[@]}" exec -T db sh -c \
+            'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' \
+            | gzip > "$BACKUP_FILE"
+
+          test -s "$BACKUP_FILE"
+          find /opt/queueflow-backups -type f -name '*.sql.gz' -mtime +30 -delete
+
+          echo "Downloading latest code..."
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+
+          echo "Validating Docker configuration..."
+          "${COMPOSE[@]}" config --quiet
+
+          echo "Updating database schema..."
+          "${COMPOSE[@]}" up -d db
+          "${COMPOSE[@]}" exec -T db sh -c \
+            'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /docker-entrypoint-initdb.d/001-queueflow-schema.sql'
+
+          echo "Building and restarting QueueFlow..."
+          "${COMPOSE[@]}" up -d --build --no-deps app
+
+          echo "Checking application health..."
+          for attempt in $(seq 1 18); do
+            if curl -fsS 'http://127.0.0.1:3001/api?action=health'; then
+              echo
+              echo "DEPLOY_OK"
+              "${COMPOSE[@]}" ps
+              exit 0
+            fi
+
+            sleep 5
+          done
+
+          echo "Health check failed"
+          "${COMPOSE[@]}" logs --tail=100 app
+          exit 1
+          REMOTE_SCRIPT
