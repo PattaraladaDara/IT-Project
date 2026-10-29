@@ -8,11 +8,16 @@ const reportMocks = vi.hoisted(() => ({
   printReport: vi.fn(),
 }));
 
+const queueHookMocks = vi.hoisted(() => ({
+  queue: null,
+  setQueue: vi.fn(),
+}));
+
 vi.mock('../src/reportExport.js', () => reportMocks);
 
 vi.mock('../src/hooks/useQueueData.js', () => ({
   useQueueData: () => ({
-    queue: {
+    queue: queueHookMocks.queue || {
       tickets: [
         { id: 1, ticketCode: 'Q001', category: 'general', status: 'waiting', currentPoint: 1, sequenceNo: 1, issuedAt: '2026-10-25T01:00:00.000Z', arrivedAt: '2026-10-25T01:00:00.000Z' },
         { id: 2, ticketCode: 'Q002', category: 'general', status: 'called', currentPoint: 4, sequenceNo: 2, issuedAt: '2026-10-25T02:00:00.000Z', calledAt: '2026-10-25T02:10:00.000Z' },
@@ -20,7 +25,7 @@ vi.mock('../src/hooks/useQueueData.js', () => ({
       ],
       servicePoints: [{ point: 1, name: 'เวชระเบียนและวัดค่าพื้นฐาน' }, { point: 4, name: 'พบแพทย์' }, { point: 7, name: 'ทำแผล' }],
     },
-    setQueue: vi.fn(), loading: false, refreshing: false, error: '', refresh: vi.fn(),
+    setQueue: queueHookMocks.setQueue, loading: false, refreshing: false, error: '', refresh: vi.fn(),
   }),
 }));
 
@@ -52,7 +57,10 @@ function openRoute(route, authenticated = false, point = 4) {
 describe('application routes', () => {
   beforeEach(() => {
     localStorage.clear();
+    queueHookMocks.queue = null;
+    queueHookMocks.setQueue.mockReset();
     window.alert = vi.fn();
+    window.print = vi.fn();
     reportMocks.downloadCsvReport.mockReset();
     reportMocks.downloadExcelReport.mockReset().mockResolvedValue(undefined);
     reportMocks.printReport.mockReset();
@@ -74,6 +82,32 @@ describe('application routes', () => {
     fireEvent.click(screen.getByText('ผู้ป่วยทั่วไป'));
     fireEvent.click(screen.getByRole('button', { name: 'ยืนยันรับบัตรคิว' }));
     await waitFor(() => expect(container.textContent).toContain('ออกบัตรคิวสำเร็จ'));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.textContent).toContain('Q004');
+    expect(screen.getByRole('button', { name: 'พิมพ์บัตรคิว' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'ไม่พิมพ์บัตรคิว' })).toBeTruthy();
+  });
+
+  it('keeps the latest issued ticket visible after choosing not to print', async () => {
+    openRoute('/kiosk');
+    expect(screen.getByText('ออกบัตรคิวล่าสุด')).toBeTruthy();
+    fireEvent.click(screen.getByText('ผู้ป่วยทั่วไป'));
+    fireEvent.click(screen.getByRole('button', { name: 'ยืนยันรับบัตรคิว' }));
+    await screen.findByRole('dialog');
+    fireEvent.click(screen.getByRole('button', { name: 'ไม่พิมพ์บัตรคิว' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByText('Q004')).toBeTruthy();
+  });
+
+  it('prints the issued ticket and closes the confirmation dialog', async () => {
+    openRoute('/kiosk');
+    fireEvent.click(screen.getByText('ผู้ป่วยทั่วไป'));
+    fireEvent.click(screen.getByRole('button', { name: 'ยืนยันรับบัตรคิว' }));
+    await screen.findByRole('dialog');
+    fireEvent.click(screen.getByRole('button', { name: 'พิมพ์บัตรคิว' }));
+    expect(window.print).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByText('Q004')).toBeTruthy();
   });
 
   it('validates login and signs a service-point user in', async () => {
@@ -153,5 +187,42 @@ describe('application routes', () => {
     openRoute('/operator', true, 1);
     fireEvent.click(screen.getAllByRole('button', { name: 'เรียกคิว' })[1]);
     expect(await screen.findByText('เจ้าหน้าที่ทดสอบ')).toBeTruthy();
+  });
+
+  it('offers every supported route for the active queue at service point 7', () => {
+    openRoute('/operator', true, 7);
+    expect(screen.getByRole('button', { name: 'ส่งต่อไปจุดบริการ 4' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'ส่งต่อไปจุดบริการ 6' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'เสร็จสิ้นการรับบริการ' })).toBeTruthy();
+  });
+
+  it('keeps an individual recall button for every skipped queue and enables them only when the point is free', async () => {
+    const skippedTickets = [
+      { id: 11, ticketCode: 'Q011', category: 'general', status: 'skipped', currentPoint: 1, sequenceNo: 11, issuedAt: '2026-10-25T04:00:00.000Z', skippedAt: '2026-10-25T04:10:00.000Z' },
+      { id: 12, ticketCode: 'Q012', category: 'emergency', status: 'skipped', currentPoint: 1, sequenceNo: 12, issuedAt: '2026-10-25T04:05:00.000Z', skippedAt: '2026-10-25T04:15:00.000Z' },
+    ];
+    queueHookMocks.queue = {
+      tickets: [
+        { id: 10, ticketCode: 'Q010', category: 'general', status: 'called', currentPoint: 1, sequenceNo: 10, issuedAt: '2026-10-25T03:55:00.000Z' },
+        ...skippedTickets,
+      ],
+      servicePoints: [{ point: 1, name: 'เวชระเบียนและวัดค่าพื้นฐาน' }],
+    };
+    openRoute('/operator', true, 1);
+    expect(screen.getByRole('button', { name: 'เรียกคิว Q011 อีกครั้ง' }).disabled).toBe(true);
+    expect(screen.getByRole('button', { name: 'เรียกคิว Q012 อีกครั้ง' }).disabled).toBe(true);
+    expect(screen.getByRole('button', { name: /ประกาศคิวปัจจุบันซ้ำ/ }).disabled).toBe(false);
+
+    cleanup();
+    queueHookMocks.queue = {
+      tickets: skippedTickets,
+      servicePoints: [{ point: 1, name: 'เวชระเบียนและวัดค่าพื้นฐาน' }],
+    };
+    openRoute('/operator', true, 1);
+    const firstRecall = screen.getByRole('button', { name: 'เรียกคิว Q011 อีกครั้ง' });
+    expect(firstRecall.disabled).toBe(false);
+    expect(screen.getByRole('button', { name: 'เรียกคิว Q012 อีกครั้ง' }).disabled).toBe(false);
+    fireEvent.click(firstRecall);
+    await waitFor(() => expect(queueHookMocks.setQueue).toHaveBeenCalledOnce());
   });
 });

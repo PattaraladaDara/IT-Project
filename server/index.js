@@ -40,10 +40,7 @@ function sendJson(res, statusCode, payload) {
   const body = JSON.stringify(payload);
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Cache-Control': 'no-store',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type'
+    'Cache-Control': 'no-store'
   });
   res.end(body);
 }
@@ -408,7 +405,7 @@ async function completeServiceStep(ticketId, point) {
     );
     if (!step.rows.length) return { error: 'ไม่พบคิวที่กำลังให้บริการ ณ จุดนี้' };
     if (point === 3) return { error: 'กรุณาเลือกส่งต่อไปจุดบริการ 4 หรือจุดบริการ 7' };
-    if (point === 7) return { error: 'กรุณาเลือกส่งต่อไปจุดบริการ 4 หรือเสร็จสิ้นการรับบริการ' };
+    if (point === 7) return { error: 'กรุณาเลือกส่งต่อไปจุดบริการ 4 จุดบริการ 6 หรือเสร็จสิ้นการรับบริการ' };
     await client.query(`UPDATE ticket_service_steps SET step_status = 'completed', completed_at = now(), updated_at = now() WHERE id = $1`, [step.rows[0].id]);
     let nextPoint = null;
     if (point === 1) nextPoint = 3;
@@ -424,13 +421,14 @@ async function completeServiceStep(ticketId, point) {
   });
 }
 
+function getAllowedServiceRoutes(fromPoint) {
+  if (fromPoint === 3) return [4, 7];
+  if (fromPoint === 7) return [4, 6, 'complete'];
+  return [];
+}
+
 async function routeServiceStep(ticketId, fromPoint, destination) {
-  let allowed = [];
-  if (fromPoint === 3) {
-    allowed = [4, 7];
-  } else if (fromPoint === 7) {
-    allowed = [4, 'complete'];
-  }
+  const allowed = getAllowedServiceRoutes(fromPoint);
   if (!allowed.includes(destination)) throw new Error('เส้นทางส่งต่อไม่ถูกต้อง');
   return inTransaction(async (client) => {
     const step = await client.query(
@@ -477,13 +475,24 @@ async function recallServiceStep(ticketId, point) {
        ORDER BY s.id DESC LIMIT 1 FOR UPDATE`, [ticketId, point]
     );
     if (!step.rows.length) return { error: 'ไม่พบคิวที่ข้ามไว้ ณ จุดนี้' };
-    const active = await client.query(`SELECT 1 FROM ticket_service_steps WHERE service_point = $1 AND step_status = 'called' LIMIT 1 FOR UPDATE`, [point]);
+    const active = await client.query(
+      `SELECT 1
+       FROM ticket_service_steps active_step
+       JOIN queue_tickets active_ticket ON active_ticket.id = active_step.ticket_id
+       WHERE active_step.service_point = $1
+         AND active_step.step_status = 'called'
+         AND active_ticket.status = 'called'
+         AND active_ticket.current_service_point = $1
+       LIMIT 1
+       FOR UPDATE OF active_step, active_ticket`,
+      [point]
+    );
     if (active.rows.length) return { error: `กรุณาดำเนินการกับคิวปัจจุบันที่จุดบริการ ${point} ให้เสร็จก่อน` };
     await client.query(`UPDATE ticket_service_steps SET step_status = 'called', called_at = now(), updated_at = now() WHERE id = $1`, [step.rows[0].id]);
     await client.query(
       `UPDATE queue_tickets
-       SET status = 'called', counter = $1, called_at = now(),
-           current_service_point = $2, call_count = call_count + 1
+       SET status = 'called', counter = $1, called_at = now(), skipped_at = NULL,
+           current_service_point = $2, call_count = call_count + 1, updated_at = now()
        WHERE id = $3`,
       [String(point), point, ticketId]
     );
@@ -566,12 +575,23 @@ async function getQueueData() {
          OR
          (
            s.service_point = 7
-           AND t.status = 'done'
-           AND NOT EXISTS (
-             SELECT 1
-             FROM ticket_service_steps next_step
-             WHERE next_step.ticket_id = s.ticket_id
-               AND next_step.id > s.id
+           AND (
+             (
+               t.status = 'done'
+               AND NOT EXISTS (
+                 SELECT 1
+                 FROM ticket_service_steps next_step
+                 WHERE next_step.ticket_id = s.ticket_id
+                   AND next_step.id > s.id
+               )
+             )
+             OR EXISTS (
+               SELECT 1
+               FROM ticket_service_steps next_step
+               WHERE next_step.ticket_id = s.ticket_id
+                 AND next_step.service_point = 6
+                 AND next_step.id > s.id
+             )
            )
          )
        )
@@ -897,51 +917,29 @@ async function handlePostApi(req, res) {
 async function handleApi(req, res, url) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
+      'Allow': 'GET, POST, OPTIONS',
+      'Cache-Control': 'no-store'
     });
     return res.end();
   }
   if (req.method !== 'GET') return sendError(res, 405, 'ระบบไม่รองรับวิธีส่งคำขอนี้');
 
   const action = (url.searchParams.get('action') || 'health').trim();
+  const mutatingActions = new Set(['take', 'next', 'recall', 'done', 'skip', 'requeue', 'resetDay']);
+  if (mutatingActions.has(action)) {
+    return sendError(res, 405, 'คำสั่งเปลี่ยนข้อมูลไม่อนุญาตผ่าน GET กรุณาใช้ POST ที่ผ่านระบบปัจจุบัน');
+  }
   try {
     let result;
     switch (action) {
       case 'health':
         result = await getHealth();
         break;
-      case 'take':
-        result = await takeTicket(cleanPrefix(url.searchParams.get('prefix')));
-        break;
-      case 'next':
-        result = await callNext(cleanCounter(url.searchParams.get('counter')));
-        break;
-      case 'recall':
-        result = await recallCurrent(cleanCounter(url.searchParams.get('counter')));
-        break;
-      case 'done':
-        result = await finishCurrent(cleanCounter(url.searchParams.get('counter')), 'done');
-        break;
-      case 'skip':
-        result = await finishCurrent(cleanCounter(url.searchParams.get('counter')), 'skip');
-        break;
-      case 'requeue':
-        result = await requeueTicket(cleanQueue(url.searchParams.get('queue')));
-        break;
       case 'status':
         result = await getStatus();
         break;
       case 'queueList':
         result = await getQueueList();
-        break;
-      case 'resetDay':
-        if (url.searchParams.get('confirm') !== 'yes') {
-          result = { error: 'ต้องยืนยันด้วย confirm=yes ก่อนรีเซ็ตคิววันนี้' };
-        } else {
-          result = await resetToday();
-        }
         break;
       default:
         return sendError(res, 400, `ไม่รู้จักคำสั่ง: ${action}`);
@@ -1029,6 +1027,7 @@ module.exports = {
   cleanServicePoint,
   cleanTicketId,
   getDashboard,
+  getAllowedServiceRoutes,
   getHealth,
   getQueueData,
   getQueueList,
@@ -1038,6 +1037,7 @@ module.exports = {
   handlePostApi,
   mapTicketRow,
   readBody,
+  recallServiceStep,
   runReactAction,
   sendError,
   sendJson,

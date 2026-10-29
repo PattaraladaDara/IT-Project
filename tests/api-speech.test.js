@@ -12,7 +12,10 @@ describe('queue API', () => {
   it('returns API data and clears its timeout', async () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, data: { tickets: [] } }) });
     await expect(apiRequest('getQueue')).resolves.toEqual({ tickets: [] });
-    expect(fetch).toHaveBeenCalledWith('/api', expect.objectContaining({ method: 'POST' }));
+    expect(fetch).toHaveBeenCalledWith('/api', expect.objectContaining({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json;charset=utf-8' },
+    }));
   });
 
   it('reports invalid and failed responses', async () => {

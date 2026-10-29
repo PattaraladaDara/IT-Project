@@ -154,27 +154,40 @@ function QueueDisplay({ queueData }) {
   </div>;
 }
 
-function Kiosk({ onCreate }) {
+function ticketTime(ticket) {
+  const issuedAt = new Date(ticket?.issuedAt || ticket?.createdAt || '');
+  if (Number.isNaN(issuedAt.getTime())) return 'ไม่ระบุเวลา';
+  return `${new Intl.DateTimeFormat('th-TH', { hour: '2-digit', minute: '2-digit', hour12: false }).format(issuedAt)} น.`;
+}
+
+function Kiosk({ onCreate, latestTicket }) {
   const [category, setCategory] = useState('');
   const [phone, setPhone] = useState('');
   const [success, setSuccess] = useState(null);
+  const [lastIssuedTicket, setLastIssuedTicket] = useState(latestTicket || null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    if (!success) return undefined;
-    const timer = window.setTimeout(() => setSuccess(null), 1800);
-    return () => window.clearTimeout(timer);
-  }, [success]);
+    if (latestTicket) setLastIssuedTicket(latestTicket);
+  }, [latestTicket]);
   async function submit() {
     if (!category) return;
     setBusy(true);
     try {
       const ticket = await onCreate(category, phone);
       setSuccess(ticket);
+      setLastIssuedTicket(ticket);
       setCategory('');
       setPhone('');
     }
     catch (err) { window.alert(err.message); }
     finally { setBusy(false); }
+  }
+  function printTicket() {
+    try {
+      window.print();
+    } finally {
+      setSuccess(null);
+    }
   }
   return <Shell simple><div className="kiosk-screen">
     <header className="kiosk-topbar"><span>คลินิกมหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตกำแพงแสน</span><button type="button" className="logout-button" onClick={() => navigate('/')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m12 5-7 7 7 7M5 12h14" /></svg>กลับหน้าหลัก</button></header>
@@ -182,12 +195,27 @@ function Kiosk({ onCreate }) {
       <div className="kiosk-panel-head"><strong>เลือกบริการที่ต้องการ</strong><span>กรุณาเลือก 1 ประเภทบริการ</span></div>
       <div className="kiosk-options">{Object.entries(CATEGORY).map(([key, item]) => <button key={key} className={`kiosk-option ${category === key ? 'selected' : ''}`} aria-pressed={category === key} onClick={() => setCategory(key)}><span className="kiosk-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{key === 'general' ? <><rect x="5" y="4" width="14" height="17" rx="3" /><path d="M9 4V2h6v2M9 10h6M9 14h6M9 18h3" /></> : <path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6Z" />}</svg></span><span className="kiosk-option-copy"><strong>{item.label}</strong><small>{key === 'general' ? 'เข้ารับบริการตามลำดับคิว' : 'เข้ารับบริการด้านอุบัติเหตุ'}</small></span>{category === key && <span className="kiosk-selection-check" aria-hidden="true">✓</span>}</button>)}</div>
       <button className="kiosk-confirm" disabled={!category || busy} onClick={submit}>{busy ? 'กำลังออกคิว...' : 'ยืนยันรับบัตรคิว'}</button>
-      {success && <output className="kiosk-success">
-        <span>ออกบัตรคิวสำเร็จ · หมายเลข {success.ticketCode}</span>
-        <button className="print-ticket-button" type="button" onClick={() => window.print()}>พิมพ์บัตรคิว</button>
-      </output>}
       <p className="kiosk-note">คิวฉุกเฉินสามารถถูกจัดลำดับก่อนโดยเจ้าหน้าที่ และคิวที่ถูกข้ามจะถูกเรียกซ้ำภายหลัง</p>
+    </section>
+    <section className="kiosk-latest-ticket" aria-live="polite">
+      <header><strong>ออกบัตรคิวล่าสุด</strong><span>ข้อมูลการออกบัตรคิววันนี้</span></header>
+      {lastIssuedTicket ? <div className="kiosk-latest-ticket-body">
+        <div className="kiosk-latest-ticket-number"><small>หมายเลขคิว</small><b>{lastIssuedTicket.ticketCode}</b></div>
+        <div className="kiosk-latest-ticket-meta"><span>ประเภท</span><strong>{CATEGORY[lastIssuedTicket.category]?.label || 'ผู้ป่วยทั่วไป'}</strong><span>เวลาออกบัตร {ticketTime(lastIssuedTicket)}</span></div>
+      </div> : <p className="kiosk-latest-ticket-empty">ยังไม่มีการออกบัตรคิววันนี้</p>}
     </section></main>
+    {success && <div className="kiosk-ticket-modal-backdrop">
+      <section className="kiosk-ticket-modal" role="dialog" aria-modal="true" aria-labelledby="kiosk-ticket-modal-title">
+        <span className="kiosk-ticket-modal-check" aria-hidden="true">✓</span>
+        <h2 id="kiosk-ticket-modal-title">ออกบัตรคิวสำเร็จ</h2>
+        <p>กรุณาตรวจสอบหมายเลขก่อนเลือกพิมพ์บัตรคิว</p>
+        <div className="kiosk-ticket-modal-summary"><small>หมายเลขคิว</small><b>{success.ticketCode}</b><span>ประเภท: {CATEGORY[success.category]?.label || 'ผู้ป่วยทั่วไป'}</span><span>เวลาออกบัตร: {ticketTime(success)}</span></div>
+        <div className="kiosk-ticket-modal-actions">
+          <button className="print-ticket-button primary" type="button" onClick={printTicket}>พิมพ์บัตรคิว</button>
+          <button className="print-ticket-cancel" type="button" onClick={() => setSuccess(null)}>ไม่พิมพ์บัตรคิว</button>
+        </div>
+      </section>
+    </div>}
     {success && <section className="print-ticket" aria-hidden="true">
       <strong>บัตรคิว</strong>
       <span>สถานพยาบาล</span>
@@ -397,17 +425,17 @@ function FigmaQueue({ queueData, actions, loading, error, staffPoint, staffName 
         {current && point === 1 && <button className="queue-action done" disabled={loading} onClick={() => actions.complete(current, 1)}>ส่งต่อไปจุดบริการ 3 <span>✓</span></button>}
         {current && point === 3 && <div className="doctor-routes"><button disabled={loading} onClick={() => actions.routeService(current, 3, 4)}>ส่งต่อไปจุดบริการ 4</button><button disabled={loading} onClick={() => actions.routeService(current, 3, 7)}>ส่งต่อไปจุดบริการ 7</button></div>}
         {current && point === 4 && <button className="queue-action done" disabled={loading} onClick={() => actions.complete(current, 4)}>ส่งต่อไปจุดบริการ 6 <span>✓</span></button>}
-        {current && point === 7 && <div className="doctor-routes"><button disabled={loading} onClick={() => actions.routeService(current, 7, 4)}>ส่งต่อไปจุดบริการ 4</button><button disabled={loading} onClick={() => actions.routeService(current, 7, 'complete')}>เสร็จสิ้นการรับบริการ</button></div>}
+        {current && point === 7 && <div className="doctor-routes"><button disabled={loading} onClick={() => actions.routeService(current, 7, 4)}>ส่งต่อไปจุดบริการ 4</button><button disabled={loading} onClick={() => actions.routeService(current, 7, 6)}>ส่งต่อไปจุดบริการ 6</button><button disabled={loading} onClick={() => actions.routeService(current, 7, 'complete')}>เสร็จสิ้นการรับบริการ</button></div>}
         {current && point === 6 && <button className="queue-action done" disabled={loading} onClick={() => actions.complete(current, 6)}>เสร็จสิ้นการรับบริการ <span>✓</span></button>}
         <button className="queue-action skip" disabled={loading || !current} onClick={() => current && actions.skip(current, point)}>ข้ามคิว <span>↷</span></button>
-        <button className="queue-action recall" disabled={loading || (!skipped.length && !current)} onClick={() => skipped[0] ? recallQueue(skipped[0]) : current && repeatQueue(current)}>เรียกคิวซ้ำ <span>↻</span></button>
+        <button className="queue-action recall" disabled={loading || !current} onClick={() => current && repeatQueue(current)}>ประกาศคิวปัจจุบันซ้ำ <span>↻</span></button>
         {current && <p className="queue-action-hint">กำลังให้บริการ {current.ticketCode} ที่จุดบริการ {point}</p>}
       </div>
       <section className="figma-upcoming-card"><header><strong>คิวที่รอเรียก <small className="operator-queue-count">{waiting.length} คิว</small></strong><span>สถานะ</span><span>แก้ไข</span></header>
         {waiting.slice(0, 4).map(ticket => <div className="figma-upcoming-row" key={ticket.id}><strong>{ticket.ticketCode}</strong><span>จุดบริการ {point}</span><em className="status-waiting">รอเรียก</em><button onClick={() => actions.cancel(ticket)}>ลบคิว</button></div>)}
         {!waiting.length && <div className="figma-upcoming-empty">ไม่มีคิวถัดไป</div>}
       </section>
-      {skipped.length > 0 && <section className="figma-skipped-card"><header><strong>คิวที่ข้ามไว้</strong><span>สามารถเรียกซ้ำภายหลังได้</span></header>{skipped.map(ticket => <div className="figma-skipped-row" key={ticket.id}><strong>{ticket.ticketCode}</strong><span>{CATEGORY[ticket.category]?.label || 'ผู้ป่วยทั่วไป'}</span><button disabled={loading} onClick={() => recallQueue(ticket)}>เรียกคิวซ้ำ</button></div>)}</section>}
+      {skipped.length > 0 && <section className="figma-skipped-card"><header><strong>คิวที่ข้ามไว้</strong><span>{current ? `ดำเนินการ ${current.ticketCode} ให้เสร็จก่อน แล้วเลือกเรียกคิวที่กลับมา` : 'จุดบริการว่าง เลือกเรียกคิวที่กลับมาได้'}</span></header>{skipped.map(ticket => <div className="figma-skipped-row" key={ticket.id}><strong>{ticket.ticketCode}</strong><span>{CATEGORY[ticket.category]?.label || 'ผู้ป่วยทั่วไป'}</span><button type="button" aria-label={`เรียกคิว ${ticket.ticketCode} อีกครั้ง`} title={current ? `กรุณาดำเนินการ ${current.ticketCode} ให้เสร็จก่อน` : `เรียก ${ticket.ticketCode} ที่จุดบริการ ${point}`} disabled={loading || Boolean(current)} onClick={() => recallQueue(ticket)}>เรียกคิวนี้อีกครั้ง</button></div>)}</section>}
     </section>
   </FigmaAdminFrame>;
 }
@@ -574,7 +602,11 @@ function App() {
       const updatedTicket = { ...next, status: 'called', calledAt: updatedAt, updatedAt };
       return { ticket: updatedTicket, queue: { ...prev, tickets: prev.tickets.map(item => item.id === next.id ? updatedTicket : item), current: updatedTicket } };
     }),
-    call: ticket => ticketAction('callTicket', ticket), skip: (ticket, servicePoint) => mutate('skipTicket', { ticketId: ticket.id, servicePoint }), recall: (ticket, servicePoint) => mutate('recallTicket', { ticketId: ticket.id, servicePoint }), repeat: (ticket, servicePoint) => mutate('repeatCall', { ticketId: ticket.id, servicePoint }, prev => {
+    call: ticket => ticketAction('callTicket', ticket), skip: (ticket, servicePoint) => mutate('skipTicket', { ticketId: ticket.id, servicePoint }), recall: (ticket, servicePoint) => mutate('recallTicket', { ticketId: ticket.id, servicePoint }, prev => {
+      const updatedAt = new Date().toISOString();
+      const updatedTicket = { ...ticket, status: 'called', calledAt: updatedAt, skippedAt: null, updatedAt };
+      return { ticket: updatedTicket, queue: { ...prev, tickets: prev.tickets.map(item => item.id === ticket.id ? updatedTicket : item), current: updatedTicket } };
+    }), repeat: (ticket, servicePoint) => mutate('repeatCall', { ticketId: ticket.id, servicePoint }, prev => {
       const updatedAt = new Date().toISOString();
       const updatedTicket = { ...ticket, calledAt: updatedAt, updatedAt };
       return { ticket: updatedTicket, queue: { ...prev, tickets: prev.tickets.map(item => item.id === ticket.id ? updatedTicket : item), current: updatedTicket } };
@@ -586,10 +618,17 @@ function App() {
   const authenticated = sessionStorage.getItem('queueflow-authenticated') === 'true';
   const staffPoint = Number(sessionStorage.getItem('queueflow-service-point')) || null;
   const staffName = sessionStorage.getItem('queueflow-staff-name') || '';
+  const latestIssuedTicket = (queue?.tickets || []).reduce((latest, ticket) => {
+    if (!latest) return ticket;
+    const latestTime = new Date(latest.issuedAt || latest.createdAt || 0).getTime();
+    const ticketTimeValue = new Date(ticket.issuedAt || ticket.createdAt || 0).getTime();
+    if (ticketTimeValue !== latestTime) return ticketTimeValue > latestTime ? ticket : latest;
+    return Number(ticket.sequenceNo || ticket.id || 0) > Number(latest.sequenceNo || latest.id || 0) ? ticket : latest;
+  }, null);
   if (route === '/login') return <Login />;
   if (route === KU_ALLLOGIN_MOCK_PATH) return <KuAllLoginMock />;
   if (adminRoute && !authenticated) return <Login />;
-  if (route === '/kiosk') return <Kiosk onCreate={createTicket} />;
+  if (route === '/kiosk') return <Kiosk onCreate={createTicket} latestTicket={latestIssuedTicket} />;
   if (route === '/confirm') return <ConfirmVisit />;
   if (route === '/ticket/general') return <YourQueue ticket={{ ticketCode: 'Q001', category: 'general' }} />;
   if (route === '/ticket/emergency') return <YourQueue ticket={{ ticketCode: 'Q001', category: 'emergency' }} />;

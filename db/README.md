@@ -58,6 +58,6 @@ Then open:
 - `http://127.0.0.1:3000/#/display` — queue board
 - `http://127.0.0.1:3000/#/login` — staff login and admin screens
 
-The API keeps the same actions as the Apps Script version (`take`, `status`, `queueList`,
-`next`, `recall`, `done`, `skip`, and `resetDay`). A `requeue` action is also available for
-bringing a skipped ticket back into the waiting list.
+GET requests are read-only and support `health`, `status`, and `queueList`. Every action that
+creates, calls, routes, skips, completes, cancels, or resets queue data must use the current
+POST API. Legacy mutating GET actions are rejected with HTTP 405.

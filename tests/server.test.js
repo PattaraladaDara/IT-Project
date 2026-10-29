@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const require = createRequire(import.meta.url);
 const server = require('../server/index.js');
 const originalPoolQuery = server.__pool.query.bind(server.__pool);
+const originalPoolConnect = server.__pool.connect.bind(server.__pool);
 
 function responseMock() {
   return {
@@ -37,6 +38,7 @@ describe('server validation and mapping', () => {
     expect(server.cleanQueue(' q001 ')).toBe('Q001');
     expect(server.cleanTicketId('42')).toBe(42);
     expect(server.cleanServicePoint('7')).toBe(7);
+    expect(server.getAllowedServiceRoutes(7)).toEqual([4, 6, 'complete']);
   });
 
   it('rejects malformed identifiers', () => {
@@ -75,6 +77,8 @@ describe('server HTTP helpers', () => {
     const preflight = responseMock();
     await server.handleApi({ method: 'OPTIONS' }, preflight, new URL('http://localhost/api'));
     expect(preflight.statusCode).toBe(204);
+    expect(preflight.headers.Allow).toContain('POST');
+    expect(preflight.headers['Access-Control-Allow-Origin']).toBeUndefined();
     const method = responseMock();
     await server.handleApi({ method: 'PATCH' }, method, new URL('http://localhost/api'));
     expect(method.statusCode).toBe(405);
@@ -83,11 +87,20 @@ describe('server HTTP helpers', () => {
     expect(unknown.statusCode).toBe(400);
   });
 
-  it('requires explicit confirmation before resetting the day', async () => {
-    const res = responseMock();
-    await server.handleApi({ method: 'GET' }, res, new URL('http://localhost/api?action=resetDay'));
-    expect(res.statusCode).toBe(409);
-    expect(JSON.parse(res.body).error).toContain('confirm=yes');
+  it('rejects every mutating GET action before database access', async () => {
+    const originalQuery = server.__pool.query;
+    server.__pool.query = vi.fn();
+    try {
+      for (const action of ['take', 'next', 'recall', 'done', 'skip', 'requeue', 'resetDay']) {
+        const res = responseMock();
+        await server.handleApi({ method: 'GET' }, res, new URL(`http://localhost/api?action=${action}&confirm=yes`));
+        expect(res.statusCode).toBe(405);
+        expect(JSON.parse(res.body).error).toContain('POST');
+      }
+      expect(server.__pool.query).not.toHaveBeenCalled();
+    } finally {
+      server.__pool.query = originalQuery;
+    }
   });
 
   it('handles POST requests with missing and unknown actions', async () => {
@@ -112,6 +125,49 @@ describe('server HTTP helpers', () => {
 
   it('rejects an unsupported React action before database access', async () => {
     await expect(server.runReactAction('unknown', {})).rejects.toThrow('ไม่รู้จักคำสั่ง');
+  });
+
+  it('recalls a skipped service step when no real active ticket remains', async () => {
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ id: 77, queue: 'Q001' }] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [] }),
+      release: vi.fn(),
+    };
+    server.__pool.connect = vi.fn().mockResolvedValue(client);
+    try {
+      await expect(server.recallServiceStep(1, 4)).resolves.toEqual({ ok: true, queue: 'Q001', servicePoint: 4 });
+      expect(client.query.mock.calls[2][0]).toContain("active_ticket.status = 'called'");
+      expect(client.query.mock.calls[4][0]).toContain('skipped_at = NULL');
+      expect(client.release).toHaveBeenCalledOnce();
+    } finally {
+      server.__pool.connect = originalPoolConnect;
+    }
+  });
+
+  it('keeps a skipped queue unchanged while the same service point is busy', async () => {
+    const client = {
+      query: vi.fn()
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ id: 78, queue: 'Q002' }] })
+        .mockResolvedValueOnce({ rows: [{ exists: 1 }] })
+        .mockResolvedValueOnce({ rows: [] }),
+      release: vi.fn(),
+    };
+    server.__pool.connect = vi.fn().mockResolvedValue(client);
+    try {
+      await expect(server.recallServiceStep(2, 1)).resolves.toEqual({ error: 'กรุณาดำเนินการกับคิวปัจจุบันที่จุดบริการ 1 ให้เสร็จก่อน' });
+      expect(client.query).toHaveBeenCalledTimes(4);
+      expect(client.query.mock.calls[3][0]).toBe('COMMIT');
+      expect(client.release).toHaveBeenCalledOnce();
+    } finally {
+      server.__pool.connect = originalPoolConnect;
+    }
   });
 });
 

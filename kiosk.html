@@ -116,13 +116,17 @@
     btn.textContent = 'กำลังออกบัตรคิว...';
     errorBox.classList.remove('show');
     try{
-      const res = await fetch(`${API_URL}?action=take&prefix=${PREFIX}`);
-      const data = await res.json();
-      if (data.error){ showError(data.error); }
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json;charset=utf-8' },
+        body: JSON.stringify({ action: 'createTicket', payload: { category: 'general', prefix: PREFIX } })
+      });
+      const body = await res.json();
+      const issuedTicket = body?.data?.ticket;
+      if (!res.ok || !body?.ok || !issuedTicket){ showError(body?.error || 'ออกบัตรคิวไม่สำเร็จ'); }
       else {
-        document.getElementById('ticketNum').textContent = data.queue;
-        document.getElementById('ticketWait').textContent =
-          data.waitingAhead > 0 ? `มีคิวรออยู่ก่อนหน้า ${data.waitingAhead} คิว` : 'คุณเป็นคิวถัดไป';
+        document.getElementById('ticketNum').textContent = issuedTicket.ticketCode;
+        document.getElementById('ticketWait').textContent = 'ออกบัตรคิวเรียบร้อย กรุณารับเอกสาร';
         ticket.classList.add('show');
         setTimeout(() => { ticket.classList.remove('show'); }, 15000);
       }
