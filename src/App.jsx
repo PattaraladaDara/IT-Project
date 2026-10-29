@@ -17,6 +17,26 @@ const CATEGORY = {
   emergency: { label: 'อุบัติเหตุ', description: 'เจ้าหน้าที่สามารถจัดลำดับก่อนเมื่อจำเป็น', color: 'red', icon: '✚' },
 };
 
+const REPORT_PERIODS = [
+  { value: 'today', label: 'วันนี้' },
+  { value: 'week', label: 'สัปดาห์นี้' },
+  { value: 'month', label: 'เดือนปัจจุบัน' },
+  { value: 'three-months', label: '3 เดือนล่าสุด' },
+  { value: 'year', label: 'รายปี' },
+  { value: 'custom', label: 'กำหนดช่วงวันที่' },
+];
+
+function getBangkokToday() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date());
+}
+
+function getReportPeriodLabel(period, selectedYear) {
+  if (period === 'year') return `รายปี พ.ศ. ${Number(selectedYear) + 543}`;
+  return REPORT_PERIODS.find(item => item.value === period)?.label || 'ช่วงเวลาที่เลือก';
+}
+
 // Demo-only staff accounts. They are intentionally separate from an admin role.
 const MOCK_STAFF_ACCOUNTS = {
   point1: { password: 'test1234', point: 1, name: 'เจ้าหน้าที่จุดบริการ 1' },
@@ -442,7 +462,19 @@ function FigmaQueue({ queueData, actions, loading, error, staffPoint, staffName 
 
 function FigmaDashboard({ queueData, loading, error }) {
   const all = queueData?.tickets || [];
-  const { metrics, loading: metricsLoading, error: metricsError, refresh: refreshMetrics } = useDashboardMetrics();
+  const today = getBangkokToday();
+  const currentYear = Number(today.slice(0, 4));
+  const [range, setRange] = useState('month');
+  const [customStart, setCustomStart] = useState(today);
+  const [customEnd, setCustomEnd] = useState(today);
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const dashboardFilters = useMemo(() => ({
+    period: range,
+    start: customStart,
+    end: customEnd,
+    year: selectedYear,
+  }), [range, customStart, customEnd, selectedYear]);
+  const { metrics, loading: metricsLoading, error: metricsError, refresh: refreshMetrics } = useDashboardMetrics(dashboardFilters);
   const fallback = useMemo(() => buildDashboardFallback(all), [all]);
   const { source: data, bars, hourly, peakMax } = useMemo(
     () => buildDashboardViewModel(metrics || fallback, all),
@@ -451,13 +483,26 @@ function FigmaDashboard({ queueData, loading, error }) {
   const dashboardError = error || metricsError;
   const dashboardLoading = loading || metricsLoading;
   const updatedAt = formatDashboardUpdatedAt(metrics?.generatedAt);
+  const selectedPeriodLabel = getReportPeriodLabel(range, selectedYear);
   let dashboardNote = 'โหมดสาธิต · ยังไม่ได้เชื่อมต่อระบบข้อมูล';
   if (dashboardLoading) dashboardNote = 'กำลังโหลดข้อมูล...';
   else if (updatedAt) dashboardNote = `อัปเดตล่าสุด ${updatedAt} · จากฐานข้อมูล`;
 
   return <FigmaAdminFrame active="dashboard" title="ภาพรวมการให้บริการ" action={<div className="figma-dashboard-actions"><button className="figma-refresh" disabled={dashboardLoading} onClick={refreshMetrics}>{dashboardLoading ? 'กำลังโหลด...' : 'โหลดข้อมูลใหม่'}</button></div>}>
     <StatusBanner error={dashboardError} />
-    <DashboardReport queueData={queueData} />
+    <DashboardReport
+      queueData={queueData}
+      range={range}
+      setRange={setRange}
+      customStart={customStart}
+      setCustomStart={setCustomStart}
+      customEnd={customEnd}
+      setCustomEnd={setCustomEnd}
+      selectedYear={selectedYear}
+      setSelectedYear={setSelectedYear}
+      currentYear={currentYear}
+      today={today}
+    />
     <section className="figma-dashboard-layout">
       <section className="figma-status-strip">
         <div><span>คิวที่กำลังรอ</span><strong>{Number(data.waiting || 0)}</strong></div>
@@ -467,7 +512,7 @@ function FigmaDashboard({ queueData, loading, error }) {
       </section>
       <div className="figma-chart-card">
         <h2>ระยะเวลาและจำนวนผู้รับบริการในแต่ละจุดบริการ</h2>
-        <div className="figma-chart-toolbar"><span>วันนี้ · {data.total ?? 0} รายการ</span><div><i className="legend-users" />จำนวนผู้รับบริการ <i className="legend-wait" />เวลารอเฉลี่ย <i className="legend-time" />เวลาให้บริการเฉลี่ย</div></div>
+        <div className="figma-chart-toolbar"><span>{selectedPeriodLabel} · {data.total ?? 0} รายการ</span><div><i className="legend-users" />จำนวนผู้รับบริการ <i className="legend-wait" />เวลารอเฉลี่ย <i className="legend-time" />เวลาให้บริการเฉลี่ย</div></div>
         <div className="figma-bars">{bars.map(bar => <div className="figma-bar-group" key={bar.label}><div className="figma-bar-pair"><span className="bar-users" style={{ height: `${bar.usersHeight}%` }} /><span className="bar-wait" style={{ height: `${bar.waitHeight}%` }} /><span className="bar-time" style={{ height: `${bar.minutesHeight}%` }} /></div><strong>{bar.label}</strong><small>{bar.users} คิว</small><small>รอ {bar.waitMinutes} นาที · บริการ {bar.minutes} นาที</small></div>)}</div>
       </div>
       <div className="figma-peak-card"><h2>ช่วงเวลาที่หนาแน่น</h2>{hourly.map(item => <div className={`peak-row ${Number(item.users) > 0 && Number(item.users) === peakMax ? 'is-peak' : ''}`} key={item.hour}><span>{String(item.hour).padStart(2, '0')}:00</span><i style={{ opacity: 0.2 + ((Number(item.users) || 0) / peakMax) * 0.8 }} /><strong>{Number(item.users) || 0} คิว</strong></div>)}</div>
@@ -479,26 +524,26 @@ function FigmaDashboard({ queueData, loading, error }) {
   </FigmaAdminFrame>;
 }
 
-function DashboardReport({ queueData }) {
-  const periods = [
-    { value: 'today', label: 'วันนี้' },
-    { value: 'week', label: 'สัปดาห์นี้' },
-    { value: 'month', label: 'เดือนปัจจุบัน' },
-    { value: 'three-months', label: '3 เดือนล่าสุด' },
-    { value: 'academic-year', label: 'ปีการศึกษาปัจจุบัน' },
-    { value: 'year', label: 'ปีปัจจุบัน' },
-    { value: 'custom', label: 'กำหนดช่วงวันที่' },
-  ];
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-  const [range, setRange] = useState('month');
-  const [customStart, setCustomStart] = useState(today);
-  const [customEnd, setCustomEnd] = useState(today);
+function DashboardReport({
+  queueData,
+  range,
+  setRange,
+  customStart,
+  setCustomStart,
+  customEnd,
+  setCustomEnd,
+  selectedYear,
+  setSelectedYear,
+  currentYear,
+  today,
+}) {
   const [reportData, setReportData] = useState(null);
   const [reportLoading, setReportLoading] = useState(true);
   const [reportError, setReportError] = useState('');
   const [exportError, setExportError] = useState('');
   const [exportingFormat, setExportingFormat] = useState('');
-  const rangeLabel = Object.fromEntries(periods.map(item => [item.value, item.label]));
+  const yearOptions = Array.from({ length: 10 }, (_, index) => currentYear - index);
+  const selectedPeriodLabel = getReportPeriodLabel(range, selectedYear);
   useEffect(() => {
     if (range === 'custom' && (!customStart || !customEnd || customStart > customEnd)) {
       setReportError('ช่วงวันที่ไม่ถูกต้อง กรุณาตรวจสอบวันเริ่มต้นและวันสิ้นสุด');
@@ -508,17 +553,17 @@ function DashboardReport({ queueData }) {
     let active = true;
     setReportLoading(true);
     setReportError('');
-    apiRequest('getReport', { period: range, start: customStart, end: customEnd })
+    apiRequest('getReport', { period: range, start: customStart, end: customEnd, year: selectedYear })
       .then(data => { if (active) setReportData(data); })
       .catch(error => { if (active) setReportError(error.message || 'โหลดข้อมูลรายงานไม่สำเร็จ'); })
       .finally(() => { if (active) setReportLoading(false); });
     return () => { active = false; };
-  }, [range, customStart, customEnd]);
+  }, [range, customStart, customEnd, selectedYear]);
   const reportTickets = reportData?.tickets || (range === 'today' ? queueData?.tickets || [] : []);
   const displayDate = value => value ? new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(value)) : '-';
   async function handleFormatAction(format) {
     setExportError('');
-    const options = { tickets: reportTickets, periodLabel: rangeLabel[range], startDate: reportData?.startDate, endDate: reportData?.endDate };
+    const options = { tickets: reportTickets, periodLabel: selectedPeriodLabel, startDate: reportData?.startDate, endDate: reportData?.endDate };
     try {
       if (format === 'PDF') {
         printReport({ ...options, format });
@@ -537,7 +582,8 @@ function DashboardReport({ queueData }) {
   const formatButton = key => <button disabled={reportLoading || Boolean(reportError) || Boolean(exportingFormat)} onClick={() => handleFormatAction(key)}>{exportingFormat === key ? 'กำลังสร้าง...' : formatLabels[key]}</button>;
   return <section id="dashboard-report" className="dashboard-report-toolbar">
     <div className="dashboard-report-toolbar-copy"><strong>รายงาน</strong><span className={reportError || exportError ? 'is-error' : ''}>{reportError || exportError || (reportLoading ? 'กำลังโหลดข้อมูล...' : `${displayDate(reportData?.startDate)} – ${displayDate(reportData?.endDate)} · ${reportTickets.length} คิว`)}</span></div>
-    <label className="dashboard-report-period"><span>ช่วงเวลา</span><select value={range} onChange={event => setRange(event.target.value)}>{periods.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+    <label className="dashboard-report-period"><span>ช่วงเวลา</span><select aria-label="ช่วงเวลา" value={range} onChange={event => setRange(event.target.value)}>{REPORT_PERIODS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+    {range === 'year' && <label className="dashboard-report-period dashboard-report-year"><span>ปีที่ต้องการ</span><select aria-label="ปีที่ต้องการ" value={selectedYear} onChange={event => setSelectedYear(Number(event.target.value))}>{yearOptions.map(year => <option key={year} value={year}>พ.ศ. {year + 543}</option>)}</select></label>}
     {range === 'custom' && <div className="dashboard-report-dates"><label><span>วันที่เริ่มต้น</span><input type="date" value={customStart} max={customEnd || today} onChange={event => setCustomStart(event.target.value)} /></label><label><span>วันที่สิ้นสุด</span><input type="date" value={customEnd} min={customStart} max={today} onChange={event => setCustomEnd(event.target.value)} /></label></div>}
     <div className="dashboard-report-formats" aria-label="พิมพ์หรือส่งออกรายงาน">{formatButton('PDF')}{formatButton('Excel')}{formatButton('CSV')}</div>
   </section>;

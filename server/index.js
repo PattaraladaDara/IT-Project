@@ -619,7 +619,52 @@ async function getQueueData() {
   };
 }
 
-async function getDashboard() {
+async function resolveReportRange(payload = {}, defaultPeriod = 'month') {
+  const allowedPeriods = new Set(['today', 'week', 'month', 'three-months', 'academic-year', 'year', 'custom']);
+  const period = allowedPeriods.has(payload.period) ? payload.period : defaultPeriod;
+  const customStart = String(payload.start || '');
+  const customEnd = String(payload.end || '');
+  const requestedYear = Number.parseInt(payload.year, 10);
+  const selectedYear = Number.isInteger(requestedYear) && requestedYear >= 2000 && requestedYear <= 2100
+    ? requestedYear
+    : new Date().getFullYear();
+
+  if (period === 'custom') {
+    const validDate = /^\d{4}-\d{2}-\d{2}$/;
+    if (!validDate.test(customStart) || !validDate.test(customEnd) || customStart > customEnd) {
+      return { error: 'ช่วงวันที่ไม่ถูกต้อง กรุณาตรวจสอบวันเริ่มต้นและวันสิ้นสุด' };
+    }
+  }
+
+  const boundsResult = await pool.query(
+    `SELECT
+       CASE $1
+         WHEN 'today' THEN CURRENT_DATE
+         WHEN 'week' THEN date_trunc('week', CURRENT_DATE)::date
+         WHEN 'month' THEN date_trunc('month', CURRENT_DATE)::date
+         WHEN 'three-months' THEN (date_trunc('month', CURRENT_DATE) - INTERVAL '2 months')::date
+         WHEN 'academic-year' THEN make_date(
+           EXTRACT(YEAR FROM CURRENT_DATE)::int - CASE WHEN EXTRACT(MONTH FROM CURRENT_DATE)::int < 6 THEN 1 ELSE 0 END,
+           6, 1
+         )
+         WHEN 'year' THEN make_date($4::int, 1, 1)
+         WHEN 'custom' THEN $2::date
+       END AS "startDate",
+       CASE
+         WHEN $1 = 'custom' THEN $3::date
+         WHEN $1 = 'year' THEN make_date($4::int, 12, 31)
+         ELSE CURRENT_DATE
+       END AS "endDate"`,
+    [period, period === 'custom' ? customStart : null, period === 'custom' ? customEnd : null, selectedYear]
+  );
+  const { startDate, endDate } = boundsResult.rows[0];
+  return { period, startDate, endDate, selectedYear };
+}
+
+async function getDashboard(payload = {}) {
+  const range = await resolveReportRange(payload, 'today');
+  if (range.error) return range;
+  const { period, startDate, endDate, selectedYear } = range;
   const [summaryResult, hourlyResult, stationResult] = await Promise.all([
     pool.query(
       `SELECT COUNT(*)::int AS total,
@@ -634,17 +679,19 @@ async function getDashboard() {
                 SELECT ROUND(AVG(EXTRACT(EPOCH FROM (step.called_at - step.created_at)) / 60))
                 FROM ticket_service_steps step
                 JOIN queue_tickets step_ticket ON step_ticket.id = step.ticket_id
-                WHERE step_ticket.queue_date = CURRENT_DATE AND step.called_at IS NOT NULL
+                WHERE step_ticket.queue_date BETWEEN $1::date AND $2::date
+                  AND step.called_at IS NOT NULL
               ), 0)::int AS "averageWaitMinutes",
               COALESCE((
                 SELECT ROUND(AVG(EXTRACT(EPOCH FROM (step.completed_at - step.called_at)) / 60))
                 FROM ticket_service_steps step
                 JOIN queue_tickets step_ticket ON step_ticket.id = step.ticket_id
-                WHERE step_ticket.queue_date = CURRENT_DATE
+                WHERE step_ticket.queue_date BETWEEN $1::date AND $2::date
                   AND step.called_at IS NOT NULL AND step.completed_at IS NOT NULL
               ), 0)::int AS "averageServiceMinutes"
        FROM queue_tickets
-       WHERE queue_date = CURRENT_DATE`
+       WHERE queue_date BETWEEN $1::date AND $2::date`,
+      [startDate, endDate]
     ),
     pool.query(
       `WITH hours AS (
@@ -658,17 +705,18 @@ async function getDashboard() {
                 FILTER (WHERE t.completed_at IS NOT NULL)), 0)::int AS "averageServiceMinutes"
        FROM hours
        LEFT JOIN queue_tickets t
-         ON t.queue_date = CURRENT_DATE
+         ON t.queue_date BETWEEN $1::date AND $2::date
         AND EXTRACT(HOUR FROM t.created_at AT TIME ZONE 'Asia/Bangkok') = hours.hour
        GROUP BY hours.hour
-       ORDER BY hours.hour`
+       ORDER BY hours.hour`,
+      [startDate, endDate]
     ),
     pool.query(
       `WITH today_steps AS (
          SELECT step.*
          FROM ticket_service_steps step
          JOIN queue_tickets ticket ON ticket.id = step.ticket_id
-         WHERE ticket.queue_date = CURRENT_DATE
+         WHERE ticket.queue_date BETWEEN $1::date AND $2::date
        )
        SELECT point.point_no::text AS station,
               COUNT(step.id)::int AS served,
@@ -680,7 +728,8 @@ async function getDashboard() {
        LEFT JOIN today_steps step ON step.service_point = point.point_no
        WHERE point.point_no IN (1, 3, 4, 6, 7)
        GROUP BY point.point_no
-       ORDER BY point.point_no`
+       ORDER BY point.point_no`,
+      [startDate, endDate]
     )
   ]);
 
@@ -712,40 +761,18 @@ async function getDashboard() {
     averageServiceMinutes: Number(summary.averageServiceMinutes || 0),
     hourly,
     stations,
+    period,
+    startDate,
+    endDate,
+    selectedYear,
     generatedAt: new Date().toISOString()
   };
 }
 
 async function getReport(payload = {}) {
-  const allowedPeriods = new Set(['today', 'week', 'month', 'three-months', 'academic-year', 'year', 'custom']);
-  const period = allowedPeriods.has(payload.period) ? payload.period : 'month';
-  const customStart = String(payload.start || '');
-  const customEnd = String(payload.end || '');
-  if (period === 'custom') {
-    const validDate = /^\d{4}-\d{2}-\d{2}$/;
-    if (!validDate.test(customStart) || !validDate.test(customEnd) || customStart > customEnd) {
-      return { error: 'ช่วงวันที่ไม่ถูกต้อง กรุณาตรวจสอบวันเริ่มต้นและวันสิ้นสุด' };
-    }
-  }
-
-  const boundsResult = await pool.query(
-    `SELECT
-       CASE $1
-         WHEN 'today' THEN CURRENT_DATE
-         WHEN 'week' THEN date_trunc('week', CURRENT_DATE)::date
-         WHEN 'month' THEN date_trunc('month', CURRENT_DATE)::date
-         WHEN 'three-months' THEN (date_trunc('month', CURRENT_DATE) - INTERVAL '2 months')::date
-         WHEN 'academic-year' THEN make_date(
-           EXTRACT(YEAR FROM CURRENT_DATE)::int - CASE WHEN EXTRACT(MONTH FROM CURRENT_DATE)::int < 6 THEN 1 ELSE 0 END,
-           6, 1
-         )
-         WHEN 'year' THEN date_trunc('year', CURRENT_DATE)::date
-         WHEN 'custom' THEN $2::date
-       END AS "startDate",
-       CASE WHEN $1 = 'custom' THEN $3::date ELSE CURRENT_DATE END AS "endDate"`,
-    [period, period === 'custom' ? customStart : null, period === 'custom' ? customEnd : null]
-  );
-  const { startDate, endDate } = boundsResult.rows[0];
+  const range = await resolveReportRange(payload);
+  if (range.error) return range;
+  const { period, startDate, endDate, selectedYear } = range;
   const result = await pool.query(
     `SELECT t.id, t.queue_code AS "ticketCode", t.category, t.priority,
             t.status, t.sequence_no AS "sequenceNo", t.created_at AS "issuedAt",
@@ -763,6 +790,7 @@ async function getReport(payload = {}) {
     period,
     startDate,
     endDate,
+    selectedYear,
     tickets: result.rows.map(mapTicketRow)
   };
 }
@@ -850,7 +878,7 @@ async function runReactAction(action, payload) {
     case 'getQueue':
       return getQueueData();
     case 'getDashboard':
-      return getDashboard();
+      return getDashboard(payload);
     case 'getReport':
       return getReport(payload);
     case 'getServicePoints':

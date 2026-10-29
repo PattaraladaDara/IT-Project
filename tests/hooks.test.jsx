@@ -38,11 +38,12 @@ describe('data hooks', () => {
 
   it('loads dashboard aggregates and supports manual refresh', async () => {
     apiRequest.mockResolvedValue({ total: 12, waiting: 3 });
-    const { result } = renderHook(() => useDashboardMetrics());
+    const filters = { period: 'year', year: 2025 };
+    const { result } = renderHook(() => useDashboardMetrics(filters));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.metrics.total).toBe(12);
     await act(() => result.current.refresh());
-    expect(apiRequest).toHaveBeenCalledWith('getDashboard');
+    expect(apiRequest).toHaveBeenCalledWith('getDashboard', { period: 'year', start: '', end: '', year: 2025 });
   });
 
   it('exposes dashboard request failures', async () => {

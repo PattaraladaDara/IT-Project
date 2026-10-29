@@ -169,10 +169,21 @@ describe('application routes', () => {
 
   it('validates a custom report date range', async () => {
     const { container } = openRoute('/dashboard', true);
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'custom' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'ช่วงเวลา' }), { target: { value: 'custom' } });
     fireEvent.change(screen.getByLabelText('วันที่เริ่มต้น'), { target: { value: '2026-10-25' } });
     fireEvent.change(screen.getByLabelText('วันที่สิ้นสุด'), { target: { value: '2026-10-01' } });
     await waitFor(() => expect(container.textContent).toContain('ช่วงวันที่ไม่ถูกต้อง'));
+  });
+
+  it('combines annual ranges into a selectable year and updates the overview label', () => {
+    const { container } = openRoute('/dashboard', true);
+    const periodSelect = screen.getByRole('combobox', { name: 'ช่วงเวลา' });
+    expect(periodSelect.textContent).not.toContain('ปีการศึกษาปัจจุบัน');
+    expect(periodSelect.textContent).not.toContain('ปีปัจจุบัน');
+    fireEvent.change(periodSelect, { target: { value: 'year' } });
+    const yearSelect = screen.getByRole('combobox', { name: 'ปีที่ต้องการ' });
+    expect(yearSelect.options).toHaveLength(10);
+    expect(container.textContent).toContain('รายปี พ.ศ.');
   });
 
   it('shows an export error returned by the report generator', async () => {

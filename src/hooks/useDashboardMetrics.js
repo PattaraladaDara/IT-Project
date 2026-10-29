@@ -6,7 +6,11 @@ import { apiConfig, apiRequest } from '../api.js';
  * The dashboard is intentionally polled at the same cadence as the queue
  * board so a staff member can leave it open all day.
  */
-export function useDashboardMetrics() {
+export function useDashboardMetrics(filters = {}) {
+  const period = filters.period || 'today';
+  const start = filters.start || '';
+  const end = filters.end || '';
+  const year = filters.year || new Date().getFullYear();
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(apiConfig.configured);
   const [error, setError] = useState('');
@@ -19,7 +23,7 @@ export function useDashboardMetrics() {
 
     setLoading(true);
     try {
-      const nextMetrics = await apiRequest('getDashboard');
+      const nextMetrics = await apiRequest('getDashboard', { period, start, end, year });
       setMetrics(nextMetrics);
       setError('');
       return nextMetrics;
@@ -29,7 +33,7 @@ export function useDashboardMetrics() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [period, start, end, year]);
 
   useEffect(() => {
     refresh();

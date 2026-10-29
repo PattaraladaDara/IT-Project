@@ -189,14 +189,16 @@ describe('server reporting queries', () => {
 
   it('normalizes dashboard summary, hourly and station metrics', async () => {
     server.__pool.query
+      .mockResolvedValueOnce({ rows: [{ startDate: '2026-10-01', endDate: '2026-10-30' }] })
       .mockResolvedValueOnce({ rows: [{ total: '5', waiting: '2', calling: '1', completed: '2', skipped: '0', cancelled: '0', general: '4', emergency: '1', averageWaitMinutes: '7', averageServiceMinutes: '12' }] })
       .mockResolvedValueOnce({ rows: [{ hour: '8', users: '3', averageWaitMinutes: '5', averageServiceMinutes: '10' }] })
       .mockResolvedValueOnce({ rows: [{ station: '4', served: '3', averageWaitMinutes: '5', averageServiceMinutes: '10' }] });
-    const data = await server.getDashboard();
-    expect(data).toMatchObject({ total: 5, waiting: 2, calling: 1, emergency: 1 });
+    const data = await server.getDashboard({ period: 'month' });
+    expect(data).toMatchObject({ total: 5, waiting: 2, calling: 1, emergency: 1, period: 'month', startDate: '2026-10-01', endDate: '2026-10-30' });
     expect(data.hourly[0]).toEqual({ hour: 8, users: 3, averageWaitMinutes: 5, averageServiceMinutes: 10 });
     expect(data.stations[0].served).toBe(3);
     expect(data.generatedAt).toBeTruthy();
+    expect(server.__pool.query.mock.calls[1][1]).toEqual(['2026-10-01', '2026-10-30']);
   });
 
   it('validates and returns report ranges', async () => {
@@ -207,6 +209,15 @@ describe('server reporting queries', () => {
     const data = await server.getReport({ period: 'custom', start: '2026-10-01', end: '2026-10-25' });
     expect(data.period).toBe('custom');
     expect(data.tickets[0].status).toBe('completed');
+  });
+
+  it('uses the selected calendar year for annual reports', async () => {
+    server.__pool.query
+      .mockResolvedValueOnce({ rows: [{ startDate: '2025-01-01', endDate: '2025-12-31' }] })
+      .mockResolvedValueOnce({ rows: [] });
+    const data = await server.getReport({ period: 'year', year: 2025 });
+    expect(data).toMatchObject({ period: 'year', selectedYear: 2025, startDate: '2025-01-01', endDate: '2025-12-31' });
+    expect(server.__pool.query.mock.calls[0][1]).toEqual(['year', null, null, 2025]);
   });
 
   it('returns legacy status, queue list and health data', async () => {
