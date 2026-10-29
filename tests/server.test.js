@@ -142,6 +142,7 @@ describe('server HTTP helpers', () => {
     server.__pool.connect = vi.fn().mockResolvedValue(client);
     try {
       await expect(server.recallServiceStep(1, 4)).resolves.toEqual({ ok: true, queue: 'Q001', servicePoint: 4 });
+      expect(client.query.mock.calls[2][0]).toContain('active_ticket.queue_date = CURRENT_DATE');
       expect(client.query.mock.calls[2][0]).toContain("active_ticket.status = 'called'");
       expect(client.query.mock.calls[4][0]).toContain('skipped_at = NULL');
       expect(client.release).toHaveBeenCalledOnce();

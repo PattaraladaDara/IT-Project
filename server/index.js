@@ -481,6 +481,7 @@ async function recallServiceStep(ticketId, point) {
        JOIN queue_tickets active_ticket ON active_ticket.id = active_step.ticket_id
        WHERE active_step.service_point = $1
          AND active_step.step_status = 'called'
+         AND active_ticket.queue_date = CURRENT_DATE
          AND active_ticket.status = 'called'
          AND active_ticket.current_service_point = $1
        LIMIT 1
