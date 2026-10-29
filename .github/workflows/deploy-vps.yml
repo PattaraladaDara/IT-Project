@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: queueflow-production
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   deploy:
@@ -36,15 +36,22 @@ jobs:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_PORT: ${{ secrets.VPS_PORT }}
           VPS_USER: ${{ secrets.VPS_USER }}
+          EXPECTED_SHA: ${{ github.sha }}
         run: |
           ssh \
             -i "$HOME/.ssh/queueflow_deploy" \
             -p "$VPS_PORT" \
             "$VPS_USER@$VPS_HOST" \
-            'bash -se' <<'REMOTE_SCRIPT'
+            'bash -se' -- "$EXPECTED_SHA" <<'REMOTE_SCRIPT'
           set -Eeuo pipefail
 
+          EXPECTED_SHA="$1"
           cd /opt/queueflow
+
+          echo "Deploy target: $(hostname)"
+          echo "Repository: $(git remote get-url origin)"
+          echo "Expected commit: $EXPECTED_SHA"
+          echo "Commit before deploy: $(git rev-parse HEAD)"
 
           COMPOSE=(
             docker compose
@@ -69,6 +76,14 @@ jobs:
           git checkout main
           git pull --ff-only origin main
 
+          DEPLOYED_SHA="$(git rev-parse HEAD)"
+          echo "Commit after pull: $DEPLOYED_SHA"
+
+          if [[ "$DEPLOYED_SHA" != "$EXPECTED_SHA" ]]; then
+            echo "ERROR: VPS commit $DEPLOYED_SHA does not match GitHub commit $EXPECTED_SHA"
+            exit 1
+          fi
+
           echo "Validating Docker configuration..."
           "${COMPOSE[@]}" config --quiet
 
@@ -78,12 +93,19 @@ jobs:
             'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /docker-entrypoint-initdb.d/001-queueflow-schema.sql'
 
           echo "Building and restarting QueueFlow..."
-          "${COMPOSE[@]}" up -d --build --no-deps app
+          "${COMPOSE[@]}" up -d --build --force-recreate --no-deps app
 
           echo "Checking application health..."
           for attempt in $(seq 1 18); do
             if curl -fsS 'http://127.0.0.1:3001/api?action=health'; then
               echo
+              FINAL_SHA="$(git rev-parse HEAD)"
+              if [[ "$FINAL_SHA" != "$EXPECTED_SHA" ]]; then
+                echo "ERROR: Commit changed during deployment: $FINAL_SHA"
+                exit 1
+              fi
+
+              echo "Verified deployed commit: $FINAL_SHA"
               echo "DEPLOY_OK"
               "${COMPOSE[@]}" ps
               exit 0
