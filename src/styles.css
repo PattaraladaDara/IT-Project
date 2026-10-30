@@ -711,8 +711,10 @@
 @media screen {
   .figma-queue-layout { gap:20px; align-items:start; }
   .figma-queue-layout .figma-current-card { min-height:300px; height:auto; padding:28px; grid-template-columns:minmax(160px,.9fr) minmax(0,1.1fr); gap:26px; box-shadow:0 8px 28px #2936810d; border-color:#d9e1f1; }
-  .figma-current-ticket { position:relative; min-height:184px; height:auto; padding:38px 16px; background:#293681; font-size:clamp(46px,4vw,70px); font-weight:800; letter-spacing:1px; border-radius:18px; box-shadow:inset 0 1px 0 #ffffff24; }
+  .figma-current-ticket { position:relative; min-height:184px; height:auto; padding:38px 16px 24px; background:#293681; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; font-size:clamp(46px,4vw,70px); font-weight:800; letter-spacing:1px; border-radius:18px; box-shadow:inset 0 1px 0 #ffffff24; }
   .figma-current-ticket::before { content:'หมายเลขคิว'; position:absolute; top:16px; left:0; width:100%; text-align:center; font-size:13px; font-weight:500; letter-spacing:0; color:#d5ddff; }
+  .figma-current-ticket-code { line-height:1; }
+  .figma-current-ticket-category { color:#e7ebff; font-size:clamp(14px,1.3vw,18px); font-weight:700; letter-spacing:0; line-height:1.25; text-align:center; }
   .figma-current-info strong { font-size:clamp(23px,2vw,31px); color:#102b50; line-height:1.5; }
   .figma-current-info>span { margin-top:10px; font-size:16px; font-weight:500; line-height:1.8; color:#65759a; }
   .figma-current-info .sound-toggle { margin-top:20px; font-size:13px; padding:9px 13px; }

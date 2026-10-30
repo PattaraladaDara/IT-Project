@@ -147,7 +147,7 @@ describe('application routes', () => {
     cleanup();
     const dashboard = openRoute('/dashboard', true);
     expect(dashboard.container.textContent).toContain('ภาพรวมการให้บริการ');
-    expect(dashboard.container.textContent).toContain('พิมพ์เอกสาร');
+    expect(dashboard.container.textContent).toContain('PDF');
   });
 
   it('redirects the removed report route to dashboard', () => {
@@ -158,11 +158,11 @@ describe('application routes', () => {
 
   it('prints and exports every dashboard report format', async () => {
     openRoute('/dashboard', true);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'พิมพ์เอกสาร' }).disabled).toBe(false));
-    fireEvent.click(screen.getByRole('button', { name: 'พิมพ์เอกสาร' }));
-    fireEvent.click(screen.getByRole('button', { name: 'ตารางคำนวณ' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'PDF' }).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: 'PDF' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Excel' }));
     await waitFor(() => expect(reportMocks.downloadExcelReport).toHaveBeenCalledOnce());
-    fireEvent.click(screen.getByRole('button', { name: 'ข้อมูลแบบคั่นด้วยจุลภาค' }));
+    fireEvent.click(screen.getByRole('button', { name: 'CSV' }));
     expect(reportMocks.printReport).toHaveBeenCalledOnce();
     expect(reportMocks.downloadCsvReport).toHaveBeenCalledOnce();
   });
@@ -189,8 +189,8 @@ describe('application routes', () => {
   it('shows an export error returned by the report generator', async () => {
     const { container } = openRoute('/dashboard', true);
     reportMocks.downloadExcelReport.mockRejectedValueOnce(new Error('สร้าง Excel ไม่สำเร็จ'));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'ตารางคำนวณ' }).disabled).toBe(false));
-    fireEvent.click(screen.getByRole('button', { name: 'ตารางคำนวณ' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Excel' }).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Excel' }));
     await waitFor(() => expect(container.textContent).toContain('สร้าง Excel ไม่สำเร็จ'));
   });
 
@@ -201,7 +201,8 @@ describe('application routes', () => {
   });
 
   it('offers every supported route for the active queue at service point 7', () => {
-    openRoute('/operator', true, 7);
+    const { container } = openRoute('/operator', true, 7);
+    expect(container.textContent).toContain('ประเภท: อุบัติเหตุ');
     expect(screen.getByRole('button', { name: 'ส่งต่อไปจุดบริการ 4' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'ส่งต่อไปจุดบริการ 6' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'เสร็จสิ้นการรับบริการ' })).toBeTruthy();

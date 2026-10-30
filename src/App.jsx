@@ -437,7 +437,10 @@ function FigmaQueue({ queueData, actions, loading, error, staffPoint, staffName 
     <StatusBanner error={error} />
     <section className="figma-queue-layout">
       <div className="figma-current-card">
-        <div className="figma-current-ticket">{current?.ticketCode || '—'}</div>
+        <div className="figma-current-ticket">
+          <span className="figma-current-ticket-code">{current?.ticketCode || '—'}</span>
+          {current && <small className="figma-current-ticket-category">ประเภท: {CATEGORY[current.category]?.label || 'ผู้ป่วยทั่วไป'}</small>}
+        </div>
         <div className="figma-current-info"><strong>{staffName || 'เจ้าหน้าที่'}</strong><span>จุดบริการ {point} · {selected?.name}</span><button className={`sound-toggle ${soundEnabled ? 'enabled' : 'disabled'}`} type="button" aria-pressed={soundEnabled} onClick={toggleSound}>เสียงประกาศ: {soundEnabled ? 'เปิด' : 'ปิด'}</button></div>
       </div>
       <div className="figma-queue-actions">
@@ -573,12 +576,12 @@ function DashboardReport({
       if (format === 'Excel') await downloadExcelReport(options);
       else downloadCsvReport(options);
     } catch (error) {
-      setExportError(error.message || `${format === 'PDF' ? 'เปิดหน้าพิมพ์' : 'ส่งออกไฟล์'} ${({ PDF: 'เอกสาร', Excel: 'ตารางคำนวณ', CSV: 'ข้อมูลแบบคั่นด้วยจุลภาค' })[format]} ไม่สำเร็จ`);
+      setExportError(error.message || `${format === 'PDF' ? 'เปิดหน้าพิมพ์' : 'ส่งออกไฟล์'} ${format} ไม่สำเร็จ`);
     } finally {
       setExportingFormat('');
     }
   }
-  const formatLabels = { PDF: 'พิมพ์เอกสาร', Excel: 'ตารางคำนวณ', CSV: 'ข้อมูลแบบคั่นด้วยจุลภาค' };
+  const formatLabels = { PDF: 'PDF', Excel: 'Excel', CSV: 'CSV' };
   const formatButton = key => <button disabled={reportLoading || Boolean(reportError) || Boolean(exportingFormat)} onClick={() => handleFormatAction(key)}>{exportingFormat === key ? 'กำลังสร้าง...' : formatLabels[key]}</button>;
   return <section id="dashboard-report" className="dashboard-report-toolbar">
     <div className="dashboard-report-toolbar-copy"><strong>รายงาน</strong><span className={reportError || exportError ? 'is-error' : ''}>{reportError || exportError || (reportLoading ? 'กำลังโหลดข้อมูล...' : `${displayDate(reportData?.startDate)} – ${displayDate(reportData?.endDate)} · ${reportTickets.length} คิว`)}</span></div>
