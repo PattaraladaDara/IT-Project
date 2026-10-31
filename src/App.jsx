@@ -87,6 +87,12 @@ function useHashRoute() {
   return route;
 }
 
+function ProjectFooter() {
+  return <footer className="project-footer">
+    <span>จัดทำโดย นิสิตชั้นปีที่ 4 สาขาเทคโนโลยีสารสนเทศ ภาคปกติ มหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตกำแพงแสน</span>
+  </footer>;
+}
+
 function Shell({ children, title = '', role = '', simple = false }) {
   return <div className={`app-shell ${simple ? 'simple-shell' : ''}`}>
     {!simple && <header className="topbar">
@@ -95,7 +101,7 @@ function Shell({ children, title = '', role = '', simple = false }) {
       <span className="role-chip">{role}</span>
     </header>}
     {children}
-    {!simple && <footer className="footer"><strong>ระบบรันคิว</strong><span>© 2024 ระบบจัดการคิว สงวนลิขสิทธิ์</span><nav><button onClick={() => navigate('/kiosk')}>บริการ</button><button onClick={() => navigate('/confirm')}>บัตรคิวของฉัน</button><button>ประวัติ</button></nav></footer>}
+    <ProjectFooter />
   </div>;
 }
 
@@ -308,7 +314,7 @@ function Login() {
         <span><strong>เข้าสู่ระบบด้วย KU All-Login</strong><small>โหมดจำลองสำหรับการนำเสนอ</small></span>
       </button>
       <button className="login-back" type="button" onClick={() => navigate('/')}>กลับหน้าหลัก</button>
-    </form><section className="mock-account-list"><strong>บัญชีทดลองเจ้าหน้าที่</strong><p className="mock-account-hint">เลือกบัญชีเพื่อกรอกชื่อผู้ใช้และรหัสผ่านอัตโนมัติ</p>{Object.entries(MOCK_STAFF_ACCOUNTS).map(([user, account]) => <button key={user} type="button" onClick={() => { setUsername(user); setPassword(account.password); setError(''); }}><span>{account.name}</span><small>{user} / test1234</small></button>)}</section></div></main>
+    </form></div></main>
   </div></Shell>;
 }
 
@@ -380,6 +386,7 @@ function FigmaAdminFrame({ active, title, children, action }) {
         <div className="figma-admin-heading"><div><h1>{title}</h1><p>สถานพยาบาล มหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตกำแพงแสน</p></div>{action}</div>
         {children}
       </main>
+      <ProjectFooter />
     </div>
   </div>;
 }

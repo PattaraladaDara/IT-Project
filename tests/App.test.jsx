@@ -112,6 +112,7 @@ describe('application routes', () => {
 
   it('validates login and signs a service-point user in', async () => {
     const { container } = openRoute('/login');
+    expect(screen.queryByText('บัญชีทดลองเจ้าหน้าที่')).toBeNull();
     fireEvent.change(screen.getByLabelText('ชื่อผู้ใช้'), { target: { value: 'wrong' } });
     fireEvent.change(screen.getByLabelText('รหัสผ่าน'), { target: { value: 'wrong' } });
     fireEvent.click(screen.getByRole('button', { name: 'เข้าสู่ระบบ' }));

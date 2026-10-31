@@ -546,7 +546,7 @@
   .login-emblem svg { width:28px; height:28px; }
   .login-heading h1 { margin:0 0 10px; font-size:clamp(28px,3vw,36px); color:#293681; }
   .login-heading p { margin:0; color:#65718b; font-size:14px; line-height:1.7; }
-  .login-layout { width:min(920px,100%); display:grid; grid-template-columns:minmax(0,1.1fr) minmax(0,1fr); align-items:start; gap:24px; }
+  .login-layout { width:min(480px,100%); display:grid; grid-template-columns:minmax(0,1fr); align-items:start; gap:24px; }
   .login-layout .login-panel { width:100%; padding:32px; gap:22px; border-radius:22px; box-shadow:0 12px 36px #2936810e; }
   .login-panel label { font-size:14px; gap:9px; }
   .login-panel input { width:100%; min-width:0; min-height:50px; border:1px solid #c7d1e6; background:#f8faff; border-radius:12px; padding:13px 15px; font-size:16px; transition:border-color .18s,box-shadow .18s; }
@@ -1011,3 +1011,20 @@
 .ku-alllogin-disabled{width:100%;margin-top:18px;padding:14px;border:0;border-radius:12px;background:#dce5df;color:#394a40;font-weight:800;cursor:not-allowed}
 .ku-alllogin-mock .login-back{margin-top:10px;padding:12px 18px}
 @media(max-width:620px){.ku-alllogin-mock{padding:26px 18px}.ku-alllogin-flow{grid-template-columns:1fr}.ku-alllogin-mock h1{font-size:32px}}
+
+/* Project ownership footer. The full-screen queue display intentionally stays footer-free for TV use. */
+.project-footer{
+  width:100%;
+  margin-top:auto;
+  padding:14px 24px;
+  border-top:1px solid #d8dfed;
+  background:#eef2fa;
+  color:#526078;
+  font-size:13px;
+  font-weight:600;
+  line-height:1.6;
+  text-align:center;
+}
+.figma-admin-workspace>.project-footer{margin-top:24px}
+@media(max-width:620px){.project-footer{padding:12px 16px;font-size:11px}}
+@media print{.project-footer{display:none!important}}
